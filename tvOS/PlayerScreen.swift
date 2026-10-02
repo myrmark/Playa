@@ -29,6 +29,9 @@ struct PlayerScreen: View {
     /// The channel list drawn over the picture, so the guide can be read without leaving playback.
     @State private var showsPanel = false
     @FocusState private var panelFocus: Int?
+    /// The info bar with its row of options, opened by swiping up.
+    @State private var showsOptions = false
+    @FocusState private var optionFocus: Int?
     @AppStorage(PlayerScreen.panelOpacityKey) private var panelOpacity = PlayerScreen.defaultPanelOpacity
     @State private var watchTask: Task<Void, Never>?
     /// Playback details in the corner, for telling a slow stream from a slow player.
@@ -72,13 +75,13 @@ struct PlayerScreen: View {
             if showsPanel {
                 channelPanel
                     .transition(.move(edge: .leading).combined(with: .opacity))
-            } else if showsInfo || player.isPaused {
+            } else if showsOptions || showsInfo || player.isPaused {
                 infoBar
                     .transition(.opacity)
             }
         }
-        // While the panel is open its rows take the remote; otherwise the picture does.
-        .focusable(!showsPanel)
+        // While a panel is open its buttons take the remote; otherwise the picture does.
+        .focusable(!showsPanel && !showsOptions)
         // Pressing select brings up the channel list over the picture, which keeps playing.
         .onTapGesture {
             withAnimation { showsPanel = true }
@@ -96,6 +99,10 @@ struct PlayerScreen: View {
             case .right where isLive: zap(1)
             case .left where !isLive: seek(by: -15)
             case .right where !isLive: seek(by: 15)
+            // Swiping up brings up the info bar with the options for this stream.
+            case .up:
+                withAnimation { showsOptions = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { optionFocus = 0 }
             default: flashInfo()
             }
         }
@@ -121,26 +128,6 @@ struct PlayerScreen: View {
         HStack(spacing: 0) {
             ScrollViewReader { proxy in
                 List {
-                    if hasTrackChoices {
-                        Button {
-                            showsPanel = false
-                            showsTracks = true
-                        } label: {
-                            Label("Audio and subtitles", systemImage: "captions.bubble")
-                        }
-                    }
-                    Button {
-                        showsHealth.toggle()
-                        withAnimation { showsPanel = false }
-                    } label: {
-                        Label(showsHealth ? "Hide playback details" : "Show playback details", systemImage: "waveform.path.ecg")
-                    }
-                    Button {
-                        let all = MPVPlayer.Quality.allCases
-                        player.quality = all[((all.firstIndex(of: player.quality) ?? 0) + 1) % all.count]
-                    } label: {
-                        Label("Picture: \(player.quality.title)", systemImage: "sparkles.tv")
-                    }
                     ForEach(Array(session.channels.enumerated()), id: \.element.id) { position, entry in
                         Button {
                             if position != index {
@@ -243,15 +230,50 @@ struct PlayerScreen: View {
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
-                Text((hasTrackChoices ? "Swipe down for channels, audio and subtitles" : "Swipe down for channels")
-                    + (isLive ? "  ·  left and right change channel" : ""))
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                if showsOptions {
+                    options
+                } else {
+                    Text("Swipe down for channels  ·  up for options" + (isLive ? "  ·  left and right change channel" : ""))
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(40)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24))
             .padding(60)
+        }
+    }
+
+    /// What can be changed about the stream that is playing. Back closes the row.
+    private var options: some View {
+        HStack(spacing: 24) {
+            if hasTrackChoices {
+                Button {
+                    showsOptions = false
+                    showsTracks = true
+                } label: {
+                    Label("Audio and subtitles", systemImage: "captions.bubble")
+                }
+                .focused($optionFocus, equals: 0)
+            }
+            Button {
+                let all = MPVPlayer.Quality.allCases
+                player.quality = all[((all.firstIndex(of: player.quality) ?? 0) + 1) % all.count]
+            } label: {
+                Label("Picture: \(player.quality.title)", systemImage: "sparkles.tv")
+            }
+            .focused($optionFocus, equals: hasTrackChoices ? 1 : 0)
+            Button {
+                showsHealth.toggle()
+            } label: {
+                Label(showsHealth ? "Hide playback details" : "Show playback details", systemImage: "waveform.path.ecg")
+            }
+            .focused($optionFocus, equals: 2)
+        }
+        .padding(.top, 10)
+        .onExitCommand {
+            withAnimation { showsOptions = false }
         }
     }
 
