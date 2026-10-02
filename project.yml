@@ -91,7 +91,9 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
         UIRequiredDeviceCapabilities: [arm64]
-        # Only standard system encryption (HTTPS, CryptoKit), which is exempt from export paperwork.
+        # Declares the app's encryption as exempt from export documentation. Playa uses encryption
+        # only to fetch playlists and streams over HTTPS and to protect its stored data. Note that
+        # HTTPS for streams is done by the TLS libraries bundled with FFmpeg, not by the system.
         ITSAppUsesNonExemptEncryption: false
         # Most IPTV providers serve playlists and streams over plain http.
         NSAppTransportSecurity:
