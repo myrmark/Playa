@@ -48,6 +48,10 @@ open PlayaTV.xcodeproj
 
 Replace `YOURTEAMID` with your Apple developer team ID. Choose your Apple TV or a tvOS simulator as the destination and run. In the player, up and down change channel, left and right skip in films and episodes, and Play/Pause pauses.
 
+## Making a release
+
+`./release.sh` builds the Mac app, signs it with your Developer ID certificate, has Apple notarise it and writes `Playa-<version>.zip`. It needs a "Developer ID Application" certificate in the keychain and a stored notarisation login (`xcrun notarytool store-credentials playa-notary`). Without a certificate, `./build-app.sh` falls back to an ad-hoc signature, which is fine for running your own build.
+
 ## Using it
 
 1. Click **+** in the toolbar and paste your M3U URL, or choose a `.m3u` file.
@@ -74,7 +78,7 @@ Auto-play on launch and automatic reconnect can be turned on in **Settings** (‚å
 
 ## Privacy
 
-Playlist addresses usually contain your provider login. Playa keeps them on your Mac, in its preferences and in `~/Library/Application Support/Playa`, and only contacts the addresses in your playlist.
+Playlist addresses usually contain your provider login, and so does every stream address inside the playlist. Playa keeps all of it on your device and encrypts what it stores: the playlist list, the cached playlists, favourites, resume positions and the last channel are sealed with a key held in the Keychain. Playa only contacts the addresses in your playlist.
 
 ## Project layout
 

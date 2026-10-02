@@ -33,6 +33,8 @@ targets:
         group: Shared
       - path: Sources/Playa/Storage.swift
         group: Shared
+      - path: Sources/Playa/Vault.swift
+        group: Shared
     dependencies:
       - package: Playa
         product: PlayaCore

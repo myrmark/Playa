@@ -12,8 +12,18 @@ final class ResumeStore: ObservableObject {
     private static let key = "resumePositions"
 
     init() {
-        if let data = defaults.data(forKey: Self.key), let decoded = try? JSONDecoder().decode(ResumeBook.self, from: data) {
+        guard let stored = defaults.data(forKey: Self.key) else { return }
+        // Versions before the vault stored this as plain JSON.
+        let opened = Vault.open(stored)
+        if let decoded = try? JSONDecoder().decode(ResumeBook.self, from: opened ?? stored) {
             book = decoded
+            if opened == nil { save() }
+        }
+    }
+
+    private func save() {
+        if let data = try? JSONEncoder().encode(book), let sealed = Vault.seal(data) {
+            defaults.set(sealed, forKey: Self.key)
         }
     }
 
@@ -32,9 +42,7 @@ final class ResumeStore: ObservableObject {
     func record(_ channel: Channel, position: Double, duration: Double, isFinal: Bool) {
         guard channel.kind != .live, duration > 0 else { return }
         let labelChanged = book.record(url: channel.url, position: position, duration: duration)
-        if let data = try? JSONEncoder().encode(book) {
-            defaults.set(data, forKey: Self.key)
-        }
+        save()
         if labelChanged || isFinal { version += 1 }
     }
 }

@@ -82,6 +82,17 @@ final class MPVPlayer: ObservableObject {
         mpv_set_option_string(mpv, "input-default-bindings", "no")
         // Streams are direct URLs; the youtube-dl fallback only adds delay and confusing errors.
         mpv_set_option_string(mpv, "ytdl", "no")
+        // None of mpv's built-in Lua scripts (on-screen controller, stats, console) are used.
+        // Leaving them out also means no LuaJIT, which the hardened runtime would need an exception for.
+        mpv_set_option_string(mpv, "load-scripts", "no")
+        mpv_set_option_string(mpv, "osc", "no")
+        mpv_set_option_string(mpv, "load-stats-overlay", "no")
+        mpv_set_option_string(mpv, "load-osd-console", "no")
+        mpv_set_option_string(mpv, "load-auto-profiles", "no")
+        mpv_set_option_string(mpv, "load-select", "no")
+        mpv_set_option_string(mpv, "load-commands", "no")
+        mpv_set_option_string(mpv, "load-context-menu", "no")
+        mpv_set_option_string(mpv, "load-positioning", "no")
         mpv_initialize(mpv)
 
         // PLAYA_MPV_LOG=v (or debug) prints mpv's own log to stderr when run from a terminal.

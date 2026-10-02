@@ -51,15 +51,23 @@ final class PlaylistStore: ObservableObject {
         if favourites.remove(key) == nil {
             favourites.insert(key)
         }
-        defaults.set(favourites.sorted(), forKey: Self.favouritesKey)
+        persistFavourites()
     }
 
     init() {
-        favourites = Set(defaults.stringArray(forKey: Self.favouritesKey) ?? [])
-        if let data = defaults.data(forKey: Self.savedKey),
-           let decoded = try? JSONDecoder().decode([SavedPlaylist].self, from: data) {
+        if let sealed = defaults.data(forKey: Self.favouritesKey), let data = Vault.open(sealed),
+           let decoded = try? JSONDecoder().decode([String].self, from: data) {
+            favourites = Set(decoded)
+        } else if let plain = defaults.stringArray(forKey: Self.favouritesKey) {
+            // Versions before the vault stored favourites and playlists unencrypted.
+            favourites = Set(plain)
+            persistFavourites()
+        }
+        if let stored = defaults.data(forKey: Self.savedKey),
+           let decoded = try? JSONDecoder().decode([SavedPlaylist].self, from: Vault.open(stored) ?? stored) {
             saved = decoded
             activeID = defaults.string(forKey: Self.activeKey).flatMap(UUID.init(uuidString:))
+            if Vault.open(stored) == nil { persist() }
         } else if let legacyURL = defaults.string(forKey: "playlistURL"), !legacyURL.isEmpty {
             // Versions before multiple playlists stored a single URL.
             let migrated = SavedPlaylist(
@@ -69,7 +77,7 @@ final class PlaylistStore: ObservableObject {
             )
             saved = [migrated]
             activeID = migrated.id
-            try? FileManager.default.moveItem(at: cacheDirectory.appendingPathComponent("playlist.m3u"), to: cacheFile(for: migrated.id))
+            try? FileManager.default.moveItem(at: cacheDirectory.appendingPathComponent("playlist.m3u"), to: legacyCacheFile(for: migrated.id))
             defaults.removeObject(forKey: "playlistURL")
             defaults.removeObject(forKey: "lastChannelURL")
             persist()
@@ -79,6 +87,13 @@ final class PlaylistStore: ObservableObject {
 
     /// Shows the cached copy of the active playlist straight away if there is one, otherwise downloads it.
     func loadOnLaunch() async {
+        // Seal plain-text caches left by older versions, including playlists that aren't open.
+        let files = saved.map { (cacheFile(for: $0.id), legacyCacheFile(for: $0.id)) }
+        Task.detached(priority: .utility) {
+            for (file, legacy) in files where FileManager.default.fileExists(atPath: legacy.path) {
+                _ = Self.readCache(file, legacy: legacy)
+            }
+        }
         guard let active else { return }
         await show(active, forceDownload: false)
     }
@@ -110,6 +125,7 @@ final class PlaylistStore: ObservableObject {
     func remove(_ id: UUID) async {
         saved.removeAll { $0.id == id }
         try? FileManager.default.removeItem(at: cacheFile(for: id))
+        try? FileManager.default.removeItem(at: legacyCacheFile(for: id))
         try? FileManager.default.removeItem(at: cacheDirectory.appendingPathComponent("guide-\(id.uuidString).xml"))
         if activeID == id {
             activeID = saved.first?.id
@@ -128,7 +144,8 @@ final class PlaylistStore: ObservableObject {
     private func show(_ entry: SavedPlaylist, forceDownload: Bool) async {
         errorMessage = nil
         let cacheFile = cacheFile(for: entry.id)
-        if !forceDownload, let cached = await Task.detached(operation: { try? Data(contentsOf: cacheFile) }).value {
+        let legacyFile = legacyCacheFile(for: entry.id)
+        if !forceDownload, let cached = await Task.detached(operation: { Self.readCache(cacheFile, legacy: legacyFile) }).value {
             let parsed = await Self.parse(cached)
             if activeID == entry.id { playlist = parsed }
             let modified = (try? cacheFile.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
@@ -192,7 +209,7 @@ final class PlaylistStore: ObservableObject {
                 }
                 data = body
             }
-            let isUnchanged = await Task.detached { (try? Data(contentsOf: cacheFile)) == data }.value
+            let isUnchanged = await Task.detached { Self.readCache(cacheFile, legacy: nil) == data }.value
             if isUnchanged {
                 try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: cacheFile.path)
                 return .unchanged
@@ -202,7 +219,7 @@ final class PlaylistStore: ObservableObject {
                 if !quietly { errorMessage = "“\(entry.name)” was loaded but contains no channels." }
                 return .failed
             }
-            await Task.detached { try? data.write(to: cacheFile, options: .atomic) }.value
+            await Task.detached { try? Vault.seal(data)?.write(to: cacheFile, options: .atomic) }.value
             return .updated(parsed)
         } catch {
             if !quietly { errorMessage = "Could not load “\(entry.name)”: \(error.localizedDescription)" }
@@ -211,16 +228,39 @@ final class PlaylistStore: ObservableObject {
     }
 
     private func persist() {
-        if let data = try? JSONEncoder().encode(saved) {
-            defaults.set(data, forKey: Self.savedKey)
+        if let data = try? JSONEncoder().encode(saved), let sealed = Vault.seal(data) {
+            defaults.set(sealed, forKey: Self.savedKey)
         }
         defaults.set(activeID?.uuidString, forKey: Self.activeKey)
     }
 
     private var cacheDirectory: URL { Storage.directory }
 
-    private func cacheFile(for id: UUID) -> URL {
+    private func persistFavourites() {
+        if let data = try? JSONEncoder().encode(favourites.sorted()), let sealed = Vault.seal(data) {
+            defaults.set(sealed, forKey: Self.favouritesKey)
+        }
+    }
+
+    /// The cached playlist, decrypted. A plain-text cache left by an older version is
+    /// sealed and deleted the first time it is read.
+    private nonisolated static func readCache(_ file: URL, legacy: URL?) -> Data? {
+        if let sealed = try? Data(contentsOf: file) {
+            return Vault.open(sealed)
+        }
+        guard let legacy, let plain = try? Data(contentsOf: legacy), let sealed = Vault.seal(plain) else { return nil }
+        if (try? sealed.write(to: file, options: .atomic)) != nil {
+            try? FileManager.default.removeItem(at: legacy)
+        }
+        return plain
+    }
+
+    private func legacyCacheFile(for id: UUID) -> URL {
         cacheDirectory.appendingPathComponent("playlist-\(id.uuidString).m3u")
+    }
+
+    private func cacheFile(for id: UUID) -> URL {
+        cacheDirectory.appendingPathComponent("playlist-\(id.uuidString).sealed")
     }
 
     private static func defaultName(for urlString: String) -> String {
