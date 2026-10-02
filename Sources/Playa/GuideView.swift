@@ -304,13 +304,22 @@ private final class GuideRowView: NSView {
         return NSRect(x: left + 1, y: 2, width: max(right - left - 2, 0), height: bounds.height - 4)
     }
 
+    /// Hover text per tooltip area. AppKit doesn't keep a tooltip's owner alive, so the row
+    /// owns its tooltips itself and looks the text up when asked.
+    private var toolTipTexts: [NSView.ToolTipTag: String] = [:]
+
     private func updateToolTips() {
         removeAllToolTips()
+        toolTipTexts.removeAll()
         for programme in programmes {
             let times = "\(programme.start.formatted(date: .omitted, time: .shortened))–\(programme.stop.formatted(date: .omitted, time: .shortened))"
-            let text = [programme.title, times, programme.description].compactMap { $0 }.joined(separator: "\n")
-            addToolTip(rect(for: programme), owner: text as NSString, userData: nil)
+            let tag = addToolTip(rect(for: programme), owner: self, userData: nil)
+            toolTipTexts[tag] = [programme.title, times, programme.description].compactMap { $0 }.joined(separator: "\n")
         }
+    }
+
+    @objc func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData: UnsafeMutableRawPointer?) -> String {
+        toolTipTexts[tag] ?? ""
     }
 
     override func draw(_ dirtyRect: NSRect) {
