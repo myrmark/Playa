@@ -1,6 +1,6 @@
 # App Store listing
 
-Text to paste into App Store Connect. The same listing serves the Mac and Apple TV apps.
+Text to paste into App Store Connect. The same listing serves the Mac, Apple TV, iPhone and iPad apps.
 
 ## Name
 Playa
@@ -9,10 +9,10 @@ Playa
 IPTV player with TV guide
 
 ## Promotional text (170 characters max)
-A fast, native player for your own M3U playlist. Live TV, films and series with a TV guide, favourites and lists that stay in step between your Mac and Apple TV.
+A fast, native player for your own M3U playlist. Live TV, films and series with a TV guide, favourites and lists that stay in step across iPhone, iPad, Mac and Apple TV.
 
 ## Description
-Playa plays the M3U playlist from your TV provider on your Mac and Apple TV.
+Playa plays the M3U playlist from your TV provider on your iPhone, iPad, Mac and Apple TV.
 
 Playa is a player only. It contains no channels, streams or playlists, and it does not provide access to any content. You need a playlist from a service you are entitled to use.
 
@@ -45,7 +45,7 @@ PLAYBACK
 SYNC AND PRIVACY
 • Playlists, favourites, lists and resume positions sync through your own iCloud account
 • No accounts, no ads, no tracking
-• One purchase covers both Mac and Apple TV
+• One purchase covers iPhone, iPad, Mac and Apple TV
 
 Screenshots show Big Buck Bunny (© copyright 2008, Blender Foundation / www.bigbuckbunny.org) and Sintel (© copyright Blender Foundation / durian.blender.org), both licensed under Creative Commons Attribution 3.0.
 
@@ -76,6 +76,8 @@ https://raw.githubusercontent.com/myrmark/Playa/main/AppStore/demo.m3u
 On Apple TV: the app opens on the Add Playlist screen. Enter the address above and choose Add. Then open Live TV, choose "Demo channels" on the left and select a channel. Films are under the Films tab.
 
 On the Mac: click + in the toolbar, paste the address and click Add. Click a channel in the sidebar, then press the Play button.
+
+On iPhone and iPad: the app opens on the Add Playlist screen. Paste the address above and tap Add. In Live TV, tap "Demo channels" and then a channel. Tap the video to show or hide the player's controls.
 
 The demo playlist comes with an invented TV guide for its three demo channels, so the guide features can be tried: on Apple TV choose Show Guide in Live TV, on the Mac click the calendar button in the toolbar.
 
