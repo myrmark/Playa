@@ -20,6 +20,8 @@ final class MPVPlayer: ObservableObject {
 
     @Published var isPaused = false { didSet { updateKeepAwake() } }
     @Published var isBuffering = false
+    /// The frame rate of the stream last started, or 0 before one has.
+    @Published private(set) var videoFPS: Double = 0
     @Published var errorMessage: String? { didSet { updateKeepAwake() } }
     /// True while a dropped live stream is being reopened.
     @Published private(set) var isReconnecting = false
@@ -129,6 +131,17 @@ final class MPVPlayer: ObservableObject {
         mpv_set_option_string(mpv, "load-commands", "no")
         mpv_set_option_string(mpv, "load-context-menu", "no")
         mpv_set_option_string(mpv, "load-positioning", "no")
+        #if !os(macOS)
+        // The Apple TV and iPhone GPUs can't keep up with mpv's quality scalers at 1080p50
+        // on a 4K screen and drop frames; the cheap ones (mpv's "fast" profile) look the same on video.
+        for (name, value) in [
+            ("scale", "bilinear"), ("dscale", "bilinear"), ("cscale", "bilinear"), ("dither", "no"),
+            ("correct-downscaling", "no"), ("linear-downscaling", "no"), ("sigmoid-upscaling", "no"),
+            ("hdr-compute-peak", "no"), ("deband", "no"),
+        ] {
+            mpv_set_option_string(mpv, name, value)
+        }
+        #endif
         mpv_initialize(mpv)
         videoLayer.onResize = { [weak self] in self?.surfaceResized() }
 
@@ -290,6 +303,10 @@ final class MPVPlayer: ObservableObject {
         var decoder = ""
         /// Frames thrown away because they were decoded or shown too late.
         var droppedFrames = 0
+        /// Of those, the ones dropped because drawing was late, not decoding.
+        var droppedDrawing = 0
+        /// The screen's refresh rate as mpv sees it.
+        var screenRate = 0.0
         /// Seconds of stream downloaded ahead of what is on screen.
         var bufferedSeconds = 0.0
         /// Bytes per second arriving, and what the stream needs.
@@ -308,7 +325,9 @@ final class MPVPlayer: ObservableObject {
         health.video = "\(codec.uppercased()) \(Int(number("width")))×\(Int(number("height")))" + (fps > 0 ? String(format: " at %.0f fps", fps) : "")
         let hwdec = propertyString("hwdec-current") ?? "no"
         health.decoder = hwdec == "no" || hwdec.isEmpty ? "software" : "hardware (\(hwdec))"
-        health.droppedFrames = Int(number("frame-drop-count") + number("decoder-frame-drop-count"))
+        health.droppedDrawing = Int(number("frame-drop-count"))
+        health.droppedFrames = health.droppedDrawing + Int(number("decoder-frame-drop-count"))
+        health.screenRate = number("display-fps")
         health.bufferedSeconds = number("demuxer-cache-duration")
         health.arriving = number("cache-speed")
         health.needed = (number("video-bitrate") + number("audio-bitrate")) / 8
@@ -396,7 +415,9 @@ final class MPVPlayer: ObservableObject {
                 }
             }
         case MPV_EVENT_PLAYBACK_RESTART:
+            let fps = propertyString("container-fps").flatMap(Double.init) ?? 0
             DispatchQueue.main.async {
+                if fps > 0, fps != self.videoFPS { self.videoFPS = fps }
                 self.isBuffering = false
                 self.isReconnecting = false
                 self.hasStarted = true

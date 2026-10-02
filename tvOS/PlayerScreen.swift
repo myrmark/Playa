@@ -1,5 +1,6 @@
 import PlayaCore
 import SwiftUI
+import AVKit
 import UIKit
 
 /// What the player was opened with: the list the channel came from, so up/down can zap through it.
@@ -105,6 +106,7 @@ struct PlayerScreen: View {
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { dismiss() }
         }
+        .onChange(of: player.videoFPS) { _, fps in matchScreen(to: fps) }
         .onChange(of: player.position) { _, position in
             if Int(position) % 10 == 0, position > 0 { savePosition(isFinal: false) }
         }
@@ -290,7 +292,27 @@ struct PlayerScreen: View {
         resume.record(channel, position: player.position, duration: player.duration, isFinal: isFinal)
     }
 
+    private var displayManager: AVDisplayManager? {
+        UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first?.windows.first?.avDisplayManager
+    }
+
+    /// Asks the TV to run at the stream's frame rate, so 50 fps channels aren't shown with the
+    /// stutter of being fitted into 60 Hz. tvOS acts on it only when Match Frame Rate is on in
+    /// its settings. Kept across channel changes, so the screen doesn't switch back and forth.
+    private func matchScreen(to fps: Double) {
+        guard fps > 0 else { return }
+        var format: CMFormatDescription?
+        CMVideoFormatDescriptionCreate(
+            allocator: nil, codecType: kCMVideoCodecType_H264, width: 1920, height: 1080,
+            extensions: nil, formatDescriptionOut: &format)
+        guard let format else { return }
+        // Interlaced 25 and 30 fps streams are shown at twice their frame rate.
+        let rate = fps < 31 && fps > 24.5 ? fps * 2 : fps
+        displayManager?.preferredDisplayCriteria = AVDisplayCriteria(refreshRate: Float(rate), formatDescription: format)
+    }
+
     private func close() {
+        displayManager?.preferredDisplayCriteria = nil
         watchTask?.cancel()
         savePosition(isFinal: true)
         player.stop()
@@ -325,6 +347,8 @@ private struct HealthOverlay: View {
                     Text(health.video)
                     Text("Decoding: \(health.decoder)")
                     Text("Dropped frames: \(health.droppedFrames) (\(recentDrops) in the last 30 s)")
+                    Text("  drawing: \(health.droppedDrawing)  ·  decoding: \(health.droppedFrames - health.droppedDrawing)")
+                    Text("Screen: \(health.screenRate, specifier: "%.0f") Hz")
                     Text("Buffered ahead: \(health.bufferedSeconds, specifier: "%.1f") s")
                     Text("Arriving: \(Self.rate(health.arriving))  ·  needed: \(Self.rate(health.needed))")
                     Text("Stalls: \(health.stalls)")
