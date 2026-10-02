@@ -87,6 +87,7 @@ targets:
       - path: Sources/Playa/CloudSync.swift
         group: Shared
     dependencies:
+      - sdk: AVKit.framework
       - package: Playa
         product: PlayaCore
       - package: MPVKit
