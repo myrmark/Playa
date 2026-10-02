@@ -10,3 +10,5 @@ xcuserdata/
 Local.xcconfig
 Playa-*.zip
 Local.env
+# The demo playlist for App Review holds only public test streams
+!AppStore/demo.m3u
