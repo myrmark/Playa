@@ -42,15 +42,23 @@ final class EPGStore: ObservableObject {
         loadTask = Task {
             do {
                 let modified = (try? cacheFile.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+                var isStale = false
                 if modified.map({ Date().timeIntervalSince($0) > Self.maxAge }) ?? true {
-                    let (downloaded, response) = try await URLSession.shared.download(from: url)
-                    if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                        throw URLError(.badServerResponse, userInfo: [
-                            NSLocalizedDescriptionKey: "The server answered with HTTP \(http.statusCode)."
-                        ])
+                    do {
+                        let (downloaded, response) = try await URLSession.shared.download(from: url)
+                        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                            throw URLError(.badServerResponse, userInfo: [
+                                NSLocalizedDescriptionKey: "The server answered with HTTP \(http.statusCode)."
+                            ])
+                        }
+                        try? FileManager.default.removeItem(at: cacheFile)
+                        try FileManager.default.moveItem(at: downloaded, to: cacheFile)
+                    } catch {
+                        // A guide covers several days, so the last one fetched is still worth
+                        // showing when the server can't be reached for a new one.
+                        guard modified != nil, !Task.isCancelled else { throw error }
+                        isStale = true
                     }
-                    try? FileManager.default.removeItem(at: cacheFile)
-                    try FileManager.default.moveItem(at: downloaded, to: cacheFile)
                 }
                 let parsed = await Task.detached(priority: .utility) { () -> Guide in
                     guard let stream = InputStream(url: cacheFile) else { return Guide() }
@@ -62,15 +70,17 @@ final class EPGStore: ObservableObject {
                 }.value
                 guard !Task.isCancelled else { return }
                 if parsed.isEmpty {
-                    // A stale or broken download shouldn't be kept for the next 12 hours.
-                    try? FileManager.default.removeItem(at: cacheFile)
+                    // A broken download shouldn't be kept for the next 12 hours. An old guide that
+                    // has merely run out stays, in case the server is still down next time.
+                    if !isStale { try? FileManager.default.removeItem(at: cacheFile) }
                     loadedPlaylistID = nil
                     status = .failed("The guide has no programmes for this playlist's channels.")
                     return
                 }
                 guide = parsed
                 version += 1
-                loadedAt = Date()
+                // An old guide is good for a quarter of an hour, then the server is asked again.
+                loadedAt = isStale ? Date().addingTimeInterval(900 - Self.maxAge) : Date()
                 status = .loaded
             } catch {
                 guard !Task.isCancelled else { return }
