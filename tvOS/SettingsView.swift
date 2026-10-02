@@ -69,6 +69,8 @@ struct SettingsView: View {
                 }
                 .foregroundStyle(.secondary)
 
+                PINSettings()
+
                 Section("TV guide") {
                     switch epg.status {
                     case .loading: Text("Loading…")

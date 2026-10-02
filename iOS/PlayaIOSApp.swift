@@ -10,6 +10,8 @@ struct PlayaIOSApp: App {
     @StateObject private var player = MPVPlayer()
     @StateObject private var listEditor = ListEditor()
     @StateObject private var following = FollowingStore()
+    @StateObject private var lock = AppLock()
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         try? AVAudioSession.sharedInstance().setCategory(.playback)
@@ -17,7 +19,19 @@ struct PlayaIOSApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            Group {
+                // The app's content isn't even created until the PIN has been entered.
+                if lock.isLocked {
+                    LockScreen()
+                } else {
+                    RootView()
+                }
+            }
+            .environmentObject(lock)
+            // Leaving the app locks it again, so it can't be picked up where it was left.
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .background { lock.lock() }
+            }
                 .environmentObject(store)
                 .environmentObject(epg)
                 .environmentObject(resume)

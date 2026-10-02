@@ -4,16 +4,26 @@ import SwiftUI
 @main
 struct PlayaApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @StateObject private var lock = AppLock()
 
     var body: some Scene {
         Window("Playa", id: "main") {
-            ContentView()
-                .frame(minWidth: 900, minHeight: 520)
+            Group {
+                // The app's content isn't even created until the PIN has been entered.
+                if lock.isLocked {
+                    LockScreen()
+                } else {
+                    ContentView()
+                }
+            }
+            .frame(minWidth: 900, minHeight: 520)
+            .environmentObject(lock)
         }
         .defaultSize(width: 1280, height: 760)
 
         Settings {
             SettingsView()
+                .environmentObject(lock)
         }
     }
 }

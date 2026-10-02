@@ -67,6 +67,10 @@ targets:
       - path: Shared
       - path: Sources/Playa/FollowingStore.swift
         group: Shared
+      - path: Sources/Playa/AppLock.swift
+        group: Shared
+      - path: Sources/Playa/LockScreen.swift
+        group: Shared
       # Stores and the player wrapper are shared with the Mac app.
       - path: Sources/Playa/PlaylistStore.swift
         group: Shared
@@ -125,6 +129,10 @@ targets:
       - path: iOS
       - path: Shared
       - path: Sources/Playa/FollowingStore.swift
+        group: Shared
+      - path: Sources/Playa/AppLock.swift
+        group: Shared
+      - path: Sources/Playa/LockScreen.swift
         group: Shared
       # Stores and the player wrapper are shared with the Mac and Apple TV apps.
       - path: Sources/Playa/PlaylistStore.swift
