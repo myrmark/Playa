@@ -132,10 +132,11 @@ final class MPVPlayer: ObservableObject {
         mpv_set_option_string(mpv, "load-context-menu", "no")
         mpv_set_option_string(mpv, "load-positioning", "no")
         #if !os(macOS)
-        // The Apple TV and iPhone GPUs can't keep up with mpv's quality scalers at 1080p50
-        // on a 4K screen and drop frames; the cheap ones (mpv's "fast" profile) look the same on video.
+        // The Apple TV and iPhone GPUs can't keep up with mpv's quality settings at 1080p50
+        // on a 4K screen and drop frames. These are mpv's "fast" profile, except for the
+        // upscaler: bilinear is visibly soft, and Catmull-Rom is sharp for little more work.
         for (name, value) in [
-            ("scale", "bilinear"), ("dscale", "bilinear"), ("cscale", "bilinear"), ("dither", "no"),
+            ("scale", "catmull_rom"), ("dscale", "bilinear"), ("cscale", "bilinear"), ("dither", "no"),
             ("correct-downscaling", "no"), ("linear-downscaling", "no"), ("sigmoid-upscaling", "no"),
             ("hdr-compute-peak", "no"), ("deband", "no"),
         ] {
