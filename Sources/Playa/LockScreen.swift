@@ -137,7 +137,7 @@ struct PINSettings: View {
 }
 
 #if os(tvOS)
-/// A grid of digit buttons, so a PIN can be entered with the remote without the full keyboard.
+/// A row of digit buttons, so a PIN can be entered with the remote without the full keyboard.
 struct PINPad: View {
     @Binding var entry: String
     let doneTitle: String
@@ -148,28 +148,20 @@ struct PINPad: View {
             Text(entry.isEmpty ? " " : String(repeating: "●", count: entry.count))
                 .font(.title3)
                 .frame(height: 50)
-            Grid(horizontalSpacing: 20, verticalSpacing: 20) {
-                ForEach(0..<3, id: \.self) { row in
-                    GridRow {
-                        ForEach(1..<4, id: \.self) { column in
-                            digit(row * 3 + column)
-                        }
-                    }
+            // One row, so a PIN is entered with sideways swipes alone.
+            HStack(spacing: 12) {
+                ForEach(0..<10, id: \.self) { digit($0) }
+                Button {
+                    if !entry.isEmpty { entry.removeLast() }
+                } label: {
+                    Image(systemName: "delete.left").frame(width: 44)
                 }
-                GridRow {
-                    Button {
-                        if !entry.isEmpty { entry.removeLast() }
-                    } label: {
-                        Image(systemName: "delete.left").frame(width: 80)
-                    }
-                    .disabled(entry.isEmpty)
-                    digit(0)
-                    Button(action: onDone) {
-                        Image(systemName: "checkmark").frame(width: 80)
-                    }
-                    .disabled(entry.isEmpty)
-                    .accessibilityLabel(doneTitle)
+                .disabled(entry.isEmpty)
+                Button(action: onDone) {
+                    Image(systemName: "checkmark").frame(width: 44)
                 }
+                .disabled(entry.isEmpty)
+                .accessibilityLabel(doneTitle)
             }
         }
         .focusSection()
@@ -179,7 +171,7 @@ struct PINPad: View {
         Button {
             if entry.count < 8 { entry.append(String(value)) }
         } label: {
-            Text(String(value)).frame(width: 80)
+            Text(String(value)).frame(width: 44)
         }
     }
 }
