@@ -725,7 +725,7 @@ private struct PlayerPane: View {
     /// Called once a channel has been on for a little while, to record it as recently watched.
     let noteWatched: (Channel) -> Void
     let zap: (Int) -> Void
-    /// Off while the search field has focus, so a space can be typed there.
+    /// Off while the search field has focus, so a space (and M, + and −) can be typed there.
     let spaceTogglesPause: Bool
     let programmes: (now: Programme?, next: Programme?)
     let isFavourite: Bool
@@ -859,6 +859,23 @@ private struct PlayerPane: View {
         .background(.bar)
     }
 
+    /// Invisible buttons that give the volume its keys. "=" is where "+" sits unshifted on
+    /// keyboards that need Shift for "+".
+    private var volumeKeys: some View {
+        ZStack {
+            ForEach(["+", "=", "-"], id: \.self) { key in
+                Button("") {
+                    player.isMuted = false
+                    player.volume = min(max(player.volume + (key == "-" ? -5 : 5), 0), 100)
+                }
+                .keyboardShortcut(spaceTogglesPause ? KeyboardShortcut(KeyEquivalent(Character(key)), modifiers: []) : nil)
+            }
+        }
+        .opacity(0)
+        .frame(width: 0, height: 0)
+        .accessibilityHidden(true)
+    }
+
     /// Audio and subtitle choices, shown only when the stream offers any.
     @ViewBuilder
     private var trackMenu: some View {
@@ -954,10 +971,24 @@ private struct PlayerPane: View {
             Spacer()
 
             trackMenu
-            Image(systemName: "speaker.wave.2.fill")
-                .foregroundStyle(.secondary)
+            Button {
+                player.isMuted.toggle()
+            } label: {
+                Image(systemName: player.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                    .foregroundStyle(player.isMuted ? Color.primary : Color.secondary)
+                    .frame(width: 22)
+            }
+            .keyboardShortcut(spaceTogglesPause ? KeyboardShortcut("m", modifiers: []) : nil)
+            .help(player.isMuted ? "Unmute (M)" : "Mute (M)")
             Slider(value: $player.volume, in: 0...100)
                 .frame(width: 120)
+                .opacity(player.isMuted ? 0.4 : 1)
+                .help("Volume (+ and −)")
+                // Changing the volume is asking to hear something.
+                .onChange(of: player.volume) {
+                    if player.isMuted { player.isMuted = false }
+                }
+            volumeKeys
         }
         .buttonStyle(.borderless)
     }

@@ -34,6 +34,13 @@ final class MPVPlayer: ObservableObject {
         }
     }
 
+    @Published var isMuted = false {
+        didSet {
+            let isMuted = isMuted
+            queue.async { mpv_set_property_string(self.mpv, "mute", isMuted ? "yes" : "no") }
+        }
+    }
+
     private let mpv: OpaquePointer
     /// mpv's synchronous calls can block for seconds while it tears down a network
     /// stream, so they never run on the main thread.

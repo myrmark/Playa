@@ -75,6 +75,8 @@ The iPhone and iPad version is in `iOS/`, built from the same project with the *
 | Shortcut | Action |
 |---|---|
 | Space | Pause / resume |
+| M | Mute |
+| + and − | Volume |
 | ⌘D | Add or remove the current channel as a favourite |
 | ⌘G | Show the TV guide |
 | Double-click the video | Full screen |
