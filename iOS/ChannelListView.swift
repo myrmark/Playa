@@ -10,6 +10,8 @@ struct ChannelListView: View {
     @EnvironmentObject private var epg: EPGStore
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var channels: [Channel]?
+    /// Counts loads, so that only the newest one's result is shown.
+    @State private var loadCount = 0
     @State private var session: PlayerSession?
     /// Whether Live TV shows each channel's schedule as a timeline instead of a plain list.
     @AppStorage("liveShowsGuide") private var showsGuide = false
@@ -82,6 +84,11 @@ struct ChannelListView: View {
         }
         .task(id: Inputs(channelCount: store.playlist.channels.count, favourites: store.favourites, lists: store.lists, recents: store.recents)) {
             await load()
+        }
+        .onAppear {
+            // On an iPhone the list is pushed onto the screen, and the task above can be
+            // cancelled during that transition without being started again.
+            if channels == nil { Task { await load() } }
         }
         .fullScreenCover(item: $session) { session in
             PlayerView(session: session)
@@ -186,6 +193,8 @@ struct ChannelListView: View {
 
     private func load() async {
         let playlist = store.playlist, favourites = store.favourites, kind = kind, filter = filter
+        loadCount += 1
+        let thisLoad = loadCount
         // Lists and Recently Watched have an order of their own; everything else follows the playlist.
         var ordered: [String]?
         if case .list(let id) = filter { ordered = store.lists.first { $0.id == id }?.keys }
@@ -204,7 +213,9 @@ struct ChannelListView: View {
             let position = Dictionary(ordered.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
             return found.sorted { (position[$0.key] ?? 0) < (position[$1.key] ?? 0) }
         }.value
-        if !Task.isCancelled { channels = loaded }
+        // Deliberately not checking for cancellation: the result is still right for this view,
+        // and dropping it would leave the spinner up for good.
+        if thisLoad == loadCount { channels = loaded }
     }
 }
 
