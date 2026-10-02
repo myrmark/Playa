@@ -346,6 +346,7 @@ struct PlayerScreen: View {
 private struct HealthOverlay: View {
     @EnvironmentObject private var player: MPVPlayer
     @State private var health = MPVPlayer.Health()
+    @StateObject private var screen = ScreenRate()
     /// Dropped-frame counts from the last half minute, oldest first.
     @State private var drops: [Int] = []
 
@@ -371,7 +372,7 @@ private struct HealthOverlay: View {
                     Text("Decoding: \(health.decoder)  ·  picture: \(player.quality.title.lowercased())")
                     Text("Dropped frames: \(health.droppedFrames) (\(recentDrops) in the last 30 s)")
                     Text("  drawing: \(health.droppedDrawing)  ·  decoding: \(health.droppedFrames - health.droppedDrawing)")
-                    Text("Screen: \(health.screenRate, specifier: "%.0f") Hz")
+                    Text("Screen: \(screen.rate, specifier: "%.0f") Hz")
                     Text("Buffered ahead: \(health.bufferedSeconds, specifier: "%.1f") s")
                     Text("Arriving: \(Self.rate(health.arriving))  ·  needed: \(Self.rate(health.needed))")
                     Text("Stalls: \(health.stalls)")
@@ -399,6 +400,29 @@ private struct HealthOverlay: View {
 
     private static func rate(_ bytesPerSecond: Double) -> String {
         String(format: "%.1f Mbit/s", bytesPerSecond * 8 / 1_000_000)
+    }
+}
+
+/// Measures the screen's refresh rate from the timing of its frames; mpv can't see it here.
+private final class ScreenRate: NSObject, ObservableObject {
+    @Published private(set) var rate = 0.0
+    private var link: CADisplayLink?
+
+    override init() {
+        super.init()
+        let link = CADisplayLink(target: self, selector: #selector(tick))
+        // A slow tick is enough to read the frame length from.
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 1, maximum: 2, preferred: 1)
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
+    deinit { link?.invalidate() }
+
+    @objc private func tick(_ link: CADisplayLink) {
+        guard link.duration > 0 else { return }
+        let measured = (1 / link.duration).rounded()
+        if measured != rate { rate = measured }
     }
 }
 
