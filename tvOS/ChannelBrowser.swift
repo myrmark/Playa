@@ -70,7 +70,7 @@ struct ListNameSheet: View {
             TextField("Name", text: $name)
             Button(isRename ? "Rename" : "Create") {
                 switch request {
-                case .new(let key): store.createList(named: name, adding: key)
+                case .new(let key): store.createList(named: name, adding: key.map { [$0] } ?? [])
                 case .rename(let list): store.renameList(list.id, to: name)
                 }
                 dismiss()

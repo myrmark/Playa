@@ -29,8 +29,8 @@ struct ChannelTable: NSViewRepresentable {
     let subtitle: (Channel) -> String?
     /// First line of a row. Episodes show "E03 · Title" instead of the raw playlist name.
     var title: (Channel) -> String = { $0.name }
-    /// The right-click menu for a row.
-    var menu: (Channel) -> [RowMenuItem] = { _ in [] }
+    /// The right-click menu for a row, or for all selected rows when the clicked one is among them.
+    var menu: ([Channel]) -> [RowMenuItem] = { _ in [] }
     /// Set when rows can be dragged into a new order: called with the moved channel and the
     /// channel it should now sit before, or nil for the end.
     var onMove: ((Channel, Channel?) -> Void)?
@@ -47,7 +47,8 @@ struct ChannelTable: NSViewRepresentable {
         tableView.rowHeight = 38
         tableView.backgroundColor = .clear
         tableView.allowsEmptySelection = true
-        tableView.allowsMultipleSelection = false
+        // Shift- and Command-click select several rows, to add them to a list in one go.
+        tableView.allowsMultipleSelection = true
         tableView.dataSource = context.coordinator
         tableView.delegate = context.coordinator
         context.coordinator.tableView = tableView
@@ -79,7 +80,8 @@ struct ChannelTable: NSViewRepresentable {
             coordinator.generation = generation
             coordinator.channels = channels
             coordinator.reload(selecting: selection)
-        } else if coordinator.selectedChannel != selection {
+        } else if coordinator.selectedChannel != selection, !coordinator.hasMultipleSelection {
+            // A multiple selection is the user's work in progress; leave it alone.
             coordinator.select(selection)
         }
         if favouritesChanged, let tableView = coordinator.tableView {
@@ -96,7 +98,7 @@ struct ChannelTable: NSViewRepresentable {
         var favourites: Set<String> = []
         var subtitle: (Channel) -> String? = { _ in nil }
         var title: (Channel) -> String = { $0.name }
-        var menu: (Channel) -> [RowMenuItem] = { _ in [] }
+        var menu: ([Channel]) -> [RowMenuItem] = { _ in [] }
         var onMove: ((Channel, Channel?) -> Void)?
         var guideStamp = 0
         static let rowType = NSPasteboard.PasteboardType("com.filipmalmberg.Playa.channel-row")
@@ -112,8 +114,15 @@ struct ChannelTable: NSViewRepresentable {
 
         func menuNeedsUpdate(_ menu: NSMenu) {
             menu.removeAllItems()
-            guard let row = tableView?.clickedRow, channels.indices.contains(row) else { return }
-            fill(menu, with: self.menu(channels[row]))
+            guard let tableView, channels.indices.contains(tableView.clickedRow) else { return }
+            let selected = tableView.selectedRowIndexes
+            // Right-clicking inside a multiple selection acts on all of it, as in Finder.
+            let rows = selected.count > 1 && selected.contains(tableView.clickedRow) ? Array(selected) : [tableView.clickedRow]
+            fill(menu, with: self.menu(rows.filter(channels.indices.contains).map { channels[$0] }))
+        }
+
+        var hasMultipleSelection: Bool {
+            (tableView?.selectedRowIndexes.count ?? 0) > 1
         }
 
         private func fill(_ menu: NSMenu, with items: [RowMenuItem]) {
@@ -219,7 +228,9 @@ struct ChannelTable: NSViewRepresentable {
 
         func tableViewSelectionDidChange(_ notification: Notification) {
             // A reload that drops the playing channel from view must not stop playback.
-            guard !isUpdatingSelection, let channel = selectedChannel else { return }
+            // Only a plain single selection picks a channel to play; building up a multiple
+            // selection must not switch streams.
+            guard !isUpdatingSelection, !hasMultipleSelection, let channel = selectedChannel else { return }
             selection.wrappedValue = channel
         }
     }

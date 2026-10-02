@@ -19,7 +19,7 @@ struct SeriesSidebar: View {
     /// Asks for a name and creates a list holding the given key.
     let newList: (String) -> Void
     /// The right-click menu for an episode.
-    let episodeMenu: (Channel) -> [RowMenuItem]
+    let episodeMenu: ([Channel]) -> [RowMenuItem]
 
     @State private var seasonNumber = 0
 

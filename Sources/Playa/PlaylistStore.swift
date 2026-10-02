@@ -79,6 +79,10 @@ final class PlaylistStore: ObservableObject {
         if favourites.remove(key) == nil {
             favourites.insert(key)
         }
+        favouritesChanged()
+    }
+
+    private func favouritesChanged() {
         persistFavourites()
         favouritesStamp = Date()
         CloudSync.write(SyncedFavourites(updatedAt: favouritesStamp, keys: favourites.sorted()), key: Self.favouritesKey)
@@ -97,9 +101,9 @@ final class PlaylistStore: ObservableObject {
     // MARK: Lists
 
     @discardableResult
-    func createList(named name: String, adding key: String? = nil) -> UUID {
+    func createList(named name: String, adding keys: [String] = []) -> UUID {
         var list = ChannelList(name: name.trimmingCharacters(in: .whitespacesAndNewlines))
-        if let key { list.add(key) }
+        keys.forEach { list.add($0) }
         lists.append(list)
         listsChanged()
         return list.id
@@ -112,6 +116,19 @@ final class PlaylistStore: ObservableObject {
     func deleteList(_ id: UUID) {
         lists.removeAll { $0.id == id }
         listsChanged()
+    }
+
+    func add(_ keys: [String], toList id: UUID) {
+        updateList(id) { list in keys.forEach { list.add($0) } }
+    }
+
+    func remove(_ keys: [String], fromList id: UUID) {
+        updateList(id) { list in keys.forEach { list.remove($0) } }
+    }
+
+    func addFavourites(_ keys: [String]) {
+        favourites.formUnion(keys)
+        favouritesChanged()
     }
 
     /// Adds `key` to the list, or removes it if it is already there.

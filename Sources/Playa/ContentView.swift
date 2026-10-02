@@ -12,8 +12,8 @@ enum ChannelFilter: Hashable {
 
 /// What the list-name prompt is for.
 private enum ListPrompt: Identifiable {
-    /// A new list, optionally holding a first channel or show.
-    case new(adding: String?)
+    /// A new list, holding the given channels or shows from the start.
+    case new(adding: [String])
     case rename(UUID)
 
     var id: String {
@@ -137,10 +137,10 @@ struct ContentView: View {
             Button("Cancel", role: .cancel) {}
             Button({ if case .rename = prompt { "Rename" } else { "Create" } }()) {
                 switch prompt {
-                case .new(let key):
-                    let id = store.createList(named: listName, adding: key)
+                case .new(let keys):
+                    let id = store.createList(named: listName, adding: keys)
                     // A list made from the menu button, rather than from a channel, is opened.
-                    if key == nil { filter = .list(id) }
+                    if keys.isEmpty { filter = .list(id) }
                 case .rename(let id):
                     store.renameList(id, to: listName)
                 }
@@ -309,13 +309,33 @@ struct ContentView: View {
             RowMenuItem(title: list.name, isOn: list.contains(key), action: { store.toggle(key, inList: list.id) })
         }
         if !items.isEmpty { items.append(.separator) }
-        items.append(RowMenuItem(title: "New List…", action: { promptForNewList(adding: key) }))
+        items.append(RowMenuItem(title: "New List…", action: { promptForNewList(adding: [key]) }))
         return items
     }
 
-    private func promptForNewList(adding key: String?) {
+    private func promptForNewList(adding keys: [String]) {
         listName = ""
-        listPrompt = .new(adding: key)
+        listPrompt = .new(adding: keys)
+    }
+
+    /// The right-click menu for one row, or for several selected together.
+    private func rowMenu(for channels: [Channel]) -> [RowMenuItem] {
+        guard channels.count > 1 else { return channels.first.map(rowMenu(for:)) ?? [] }
+        let keys = channels.map(\.key)
+        var listItems = store.lists.map { list in
+            RowMenuItem(title: list.name, action: { store.add(keys, toList: list.id) })
+        }
+        if !listItems.isEmpty { listItems.append(.separator) }
+        listItems.append(RowMenuItem(title: "New List…", action: { promptForNewList(adding: keys) }))
+        var items = [
+            RowMenuItem(title: "Add \(keys.count) to Favourites", action: { store.addFavourites(keys) }),
+            RowMenuItem(title: "Add \(keys.count) to List", children: listItems),
+        ]
+        if let list = currentList {
+            items.append(.separator)
+            items.append(RowMenuItem(title: "Remove \(keys.count) from “\(list.name)”", action: { store.remove(keys, fromList: list.id) }))
+        }
+        return items
     }
 
     private func rowMenu(for channel: Channel) -> [RowMenuItem] {
@@ -349,7 +369,7 @@ struct ContentView: View {
     /// New, rename and delete for lists, next to the group picker.
     private var listMenu: some View {
         Menu {
-            Button("New List…") { promptForNewList(adding: nil) }
+            Button("New List…") { promptForNewList(adding: []) }
             if let list = currentList {
                 Divider()
                 Button("Rename “\(list.name)”…") {
@@ -505,7 +525,7 @@ struct ContentView: View {
                         toggleFavourite: store.toggleFavourite,
                         lists: store.lists,
                         toggleShowInList: { key, id in store.toggle(key, inList: id) },
-                        newList: { key in promptForNewList(adding: key) },
+                        newList: { key in promptForNewList(adding: [key]) },
                         episodeMenu: rowMenu(for:)
                     )
                 } else {
