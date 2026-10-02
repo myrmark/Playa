@@ -4,11 +4,14 @@ public struct Programme: Hashable, Sendable {
     public let start: Date
     public let stop: Date
     public let title: String
+    /// What the programme is about, when the guide says.
+    public let description: String?
 
-    public init(start: Date, stop: Date, title: String) {
+    public init(start: Date, stop: Date, title: String, description: String? = nil) {
         self.start = start
         self.stop = stop
         self.title = title
+        self.description = description
     }
 }
 
@@ -83,6 +86,8 @@ public final class XMLTVParser: NSObject, XMLParserDelegate {
     private var currentStop: Date?
     private var currentTitle: String?
     private var isInTitle = false
+    private var currentDescription: String?
+    private var isInDescription = false
 
     /// - Parameters:
     ///   - wantedChannels: lowercased channel ids to keep; nil keeps every channel.
@@ -116,23 +121,34 @@ public final class XMLTVParser: NSObject, XMLParserDelegate {
             currentStart = start
             currentStop = stop
             currentTitle = nil
+            currentDescription = nil
         } else if elementName == "title", currentChannel != nil, currentTitle == nil {
             isInTitle = true
             currentTitle = ""
+        } else if elementName == "desc", currentChannel != nil, currentDescription == nil {
+            isInDescription = true
+            currentDescription = ""
         }
     }
 
     public func parser(_ parser: XMLParser, foundCharacters string: String) {
         if isInTitle { currentTitle?.append(string) }
+        if isInDescription { currentDescription?.append(string) }
     }
 
     public func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName: String?) {
         if elementName == "title" {
             isInTitle = false
+        } else if elementName == "desc" {
+            isInDescription = false
         } else if elementName == "programme", let channel = currentChannel, let start = currentStart, let stop = currentStop {
             let title = currentTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if !title.isEmpty {
-                programmes[channel, default: []].append(Programme(start: start, stop: stop, title: title))
+                let description = currentDescription?.trimmingCharacters(in: .whitespacesAndNewlines)
+                programmes[channel, default: []].append(Programme(
+                    start: start, stop: stop, title: title,
+                    description: description?.isEmpty == false ? description : nil
+                ))
             }
             currentChannel = nil
         }

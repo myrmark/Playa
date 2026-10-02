@@ -25,6 +25,8 @@ final class PlaylistStore: ObservableObject {
     @Published private(set) var favourites: Set<String> = []
     /// Groups the user doesn't want to see, as `hiddenKey(group:kind:)` values.
     @Published private(set) var hiddenGroups: Set<String> = []
+    /// `Channel.key`s and show keys of what was watched lately, most recent first.
+    @Published private(set) var recents: [String] = []
     /// Collections the user put together, in the order they were created.
     @Published private(set) var lists: [ChannelList] = []
 
@@ -57,6 +59,7 @@ final class PlaylistStore: ObservableObject {
     private static let favouritesKey = "favourites"
     private static let listsKey = "lists"
     private static let hiddenKey = "hiddenGroups"
+    private static let recentsKey = "recents"
     private static let savedKey = "playlists"
     private static let activeKey = "activePlaylistID"
 
@@ -187,6 +190,32 @@ final class PlaylistStore: ObservableObject {
     private var playlistsStamp: Date {
         get { Date(timeIntervalSince1970: defaults.double(forKey: "playlistsStamp")) }
         set { defaults.set(newValue.timeIntervalSince1970, forKey: "playlistsStamp") }
+    }
+
+    // MARK: Recently watched
+
+    private static let recentsLimit = 40
+
+    /// Puts `keys` at the front of the recently-watched list.
+    func noteWatched(_ keys: [String]) {
+        let updated = Array((keys + recents.filter { !keys.contains($0) }).prefix(Self.recentsLimit))
+        guard updated != recents else { return }
+        recents = updated
+        recentsStamp = Date()
+        defaults.set(recents, forKey: Self.recentsKey)
+        CloudSync.write(SyncedFavourites(updatedAt: recentsStamp, keys: recents), key: Self.recentsKey)
+    }
+
+    private var recentsStamp: Date {
+        get { Date(timeIntervalSince1970: defaults.double(forKey: "recentsStamp")) }
+        set { defaults.set(newValue.timeIntervalSince1970, forKey: "recentsStamp") }
+    }
+
+    private func pullRecents() {
+        guard let remote = CloudSync.read(SyncedFavourites.self, key: Self.recentsKey), remote.updatedAt > recentsStamp else { return }
+        recents = remote.keys
+        recentsStamp = remote.updatedAt
+        defaults.set(recents, forKey: Self.recentsKey)
     }
 
     // MARK: Hidden groups
@@ -326,6 +355,7 @@ final class PlaylistStore: ObservableObject {
             lists = decoded
         }
         hiddenGroups = Set(defaults.stringArray(forKey: Self.hiddenKey) ?? [])
+        recents = defaults.stringArray(forKey: Self.recentsKey) ?? []
         // Older versions also stored channel favourites as stream addresses.
         if favourites.contains(where: { $0.contains("://") }) {
             favourites = Set(favourites.map { $0.contains("://") ? Channel.key(forStreamURL: $0) : $0 })
@@ -360,11 +390,13 @@ final class PlaylistStore: ObservableObject {
         pullFavourites()
         pullLists()
         pullHidden()
+        pullRecents()
         subscription = CloudSync.changes.receive(on: DispatchQueue.main).sink { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.pullFavourites()
                 self?.pullLists()
                 self?.pullHidden()
+                self?.pullRecents()
                 Task { await self?.pullPlaylists() }
             }
         }

@@ -3,6 +3,7 @@ import SwiftUI
 
 enum ChannelFilter: Hashable {
     case favourites
+    case recent
     case list(UUID)
     case group(String)
 
@@ -10,6 +11,7 @@ enum ChannelFilter: Hashable {
     var storageValue: String {
         switch self {
         case .favourites: "favourites"
+        case .recent: "recent"
         case .list(let id): "list:\(id.uuidString)"
         case .group(let name): "group:\(name)"
         }
@@ -18,6 +20,8 @@ enum ChannelFilter: Hashable {
     init?(storageValue: String) {
         if storageValue == "favourites" {
             self = .favourites
+        } else if storageValue == "recent" {
+            self = .recent
         } else if storageValue.hasPrefix("list:"), let id = UUID(uuidString: String(storageValue.dropFirst(5))) {
             self = .list(id)
         } else if storageValue.hasPrefix("group:") {
@@ -138,7 +142,7 @@ struct TwoPaneBrowser<Pane: View>: View {
     private var startFilter: ChannelFilter? {
         guard let filter = ChannelFilter(storageValue: startValue) else { return nil }
         switch filter {
-        case .favourites: return filter
+        case .favourites, .recent: return filter
         case .list(let id): return store.lists.contains { $0.id == id } ? filter : nil
         case .group(let name): return groups.contains(name) ? filter : nil
         }
@@ -211,6 +215,7 @@ struct TwoPaneBrowser<Pane: View>: View {
     private var sidebar: some View {
         List {
             filterRow(.favourites, title: "Favourites", systemImage: "star.fill")
+            filterRow(.recent, title: "Recently Watched", systemImage: "clock")
             ForEach(store.lists) { list in
                 filterRow(.list(list.id), title: list.name, systemImage: "list.bullet", list: list)
             }
@@ -308,6 +313,7 @@ struct ChannelPane: View {
         let channelCount: Int
         let favourites: Set<String>
         let lists: [ChannelList]
+        let recents: [String]
     }
 
     var body: some View {
@@ -328,6 +334,7 @@ struct ChannelPane: View {
                             row(for: channel, in: channels, now: timeline.date)
                                 .focused(focus, equals: .item(channel.id))
                         }
+                        if kind == .live { programmeDetails(in: channels, now: timeline.date) }
                     }
                 }
             } else {
@@ -335,7 +342,7 @@ struct ChannelPane: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .task(id: Inputs(channelCount: store.playlist.channels.count, favourites: store.favourites, lists: store.lists)) {
+        .task(id: Inputs(channelCount: store.playlist.channels.count, favourites: store.favourites, lists: store.lists, recents: store.recents)) {
             await load()
         }
         .fullScreenCover(item: $session) { session in
@@ -362,6 +369,30 @@ struct ChannelPane: View {
             }
         } else {
             ChannelRow(channel: channel, now: now, extraMenu: moveMenu(for: channel, in: channels), action: play)
+        }
+    }
+
+    /// What the highlighted channel is showing now, with its description when the guide has one.
+    @ViewBuilder
+    private func programmeDetails(in channels: [Channel], now: Date) -> some View {
+        if case .item(let id) = focus.wrappedValue, let channel = channels.first(where: { $0.id == id }),
+           let programme = epg.guide.nowAndNext(channelID: channel.tvgID, at: now).now {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("\(programme.title)  ·  \(programme.start.formatted(date: .omitted, time: .shortened))–\(programme.stop.formatted(date: .omitted, time: .shortened))")
+                    .font(.callout)
+                if let description = programme.description {
+                    Text(description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 16)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .padding(.horizontal, 20)
+            .padding(.top, 10)
         }
     }
 
@@ -410,6 +441,7 @@ struct ChannelPane: View {
     private var emptyText: String {
         switch filter {
         case .favourites: "No favourites here yet. Hold the select button on a channel to add it."
+        case .recent: "Nothing watched here yet."
         case .list: "This list has nothing here yet. Hold the select button on a channel to add it."
         case .group: "Nothing in this group."
         }
@@ -433,21 +465,22 @@ struct ChannelPane: View {
 
     private func load() async {
         let playlist = store.playlist, favourites = store.favourites, kind = kind, filter = filter
-        var list: ChannelList?
-        if case .list(let id) = filter { list = store.lists.first { $0.id == id } }
+        // Lists and Recently Watched have an order of their own; everything else follows the playlist.
+        var ordered: [String]?
+        if case .list(let id) = filter { ordered = store.lists.first { $0.id == id }?.keys }
+        if filter == .recent { ordered = store.recents }
         let loaded = await Task.detached(priority: .userInitiated) { () -> [Channel] in
-            let members = Set(list?.keys ?? [])
+            let members = Set(ordered ?? [])
             let found = playlist.channels.filter { channel in
                 guard channel.kind == kind else { return false }
                 switch filter {
                 case .favourites: return favourites.contains(channel.key)
-                case .list: return members.contains(channel.key)
+                case .list, .recent: return members.contains(channel.key)
                 case .group(let group): return channel.group == group
                 }
             }
-            guard let list else { return found }
-            // A list keeps the order its owner gave it.
-            let position = Dictionary(list.keys.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+            guard let ordered else { return found }
+            let position = Dictionary(ordered.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
             return found.sorted { (position[$0.key] ?? 0) < (position[$1.key] ?? 0) }
         }.value
         if Task.isCancelled { return }

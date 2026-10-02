@@ -8,6 +8,7 @@ struct GuideView: View {
     let guide: Guide
     let favourites: Set<String>
     let lists: [ChannelList]
+    let recents: [String]
     let hiddenGroups: Set<String>
     let now: Date
     let playingChannel: Channel?
@@ -25,7 +26,7 @@ struct GuideView: View {
     private static let step: TimeInterval = 2 * 3600
 
     init(
-        playlist: Playlist, guide: Guide, favourites: Set<String>, lists: [ChannelList], hiddenGroups: Set<String>, now: Date,
+        playlist: Playlist, guide: Guide, favourites: Set<String>, lists: [ChannelList], recents: [String], hiddenGroups: Set<String>, now: Date,
         initialFilter: ChannelFilter,
         playingChannel: Channel?, onPlay: @escaping (Channel) -> Void, onClose: @escaping () -> Void
     ) {
@@ -33,6 +34,7 @@ struct GuideView: View {
         self.guide = guide
         self.favourites = favourites
         self.lists = lists
+        self.recents = recents
         self.hiddenGroups = hiddenGroups
         self.now = now
         self.playingChannel = playingChannel
@@ -84,15 +86,17 @@ struct GuideView: View {
     }
 
     private func updateRows() {
-        var list: ChannelList?
-        if case .list(let id) = filter { list = lists.first { $0.id == id } }
-        let members = Set(list?.keys ?? [])
+        // Lists and Recently Watched have an order of their own.
+        var ordered: [String]?
+        if case .list(let id) = filter { ordered = lists.first { $0.id == id }?.keys }
+        if filter == .recent { ordered = recents }
+        let members = Set(ordered ?? [])
         rows = playlist.channels.filter { channel in
             guard channel.kind == .live else { return false }
             switch filter {
             case .all: guard !hiddenGroups.contains(PlaylistStore.hiddenKey(group: channel.group, kind: .live)) else { return false }
             case .favourites: guard favourites.contains(channel.key) else { return false }
-            case .list: guard members.contains(channel.key) else { return false }
+            case .list, .recent: guard members.contains(channel.key) else { return false }
             case .group(let group): guard channel.group == group else { return false }
             }
             if onlyWithProgrammes {
@@ -100,9 +104,8 @@ struct GuideView: View {
             }
             return true
         }
-        if let list {
-            // A list keeps the order its owner gave it.
-            let position = Dictionary(list.keys.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+        if let ordered {
+            let position = Dictionary(ordered.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
             rows.sort { (position[$0.key] ?? 0) < (position[$1.key] ?? 0) }
         }
         rowGeneration += 1
@@ -115,6 +118,7 @@ struct GuideView: View {
             Picker("Channels", selection: $filter) {
                 Text("All channels").tag(ChannelFilter.all)
                 Label("Favourites", systemImage: "star.fill").tag(ChannelFilter.favourites)
+                Label("Recently Watched", systemImage: "clock").tag(ChannelFilter.recent)
                 ForEach(lists) { list in
                     Label(list.name, systemImage: "list.bullet").tag(ChannelFilter.list(list.id))
                 }
@@ -304,7 +308,8 @@ private final class GuideRowView: NSView {
         removeAllToolTips()
         for programme in programmes {
             let times = "\(programme.start.formatted(date: .omitted, time: .shortened))–\(programme.stop.formatted(date: .omitted, time: .shortened))"
-            addToolTip(rect(for: programme), owner: "\(programme.title)\n\(times)" as NSString, userData: nil)
+            let text = [programme.title, times, programme.description].compactMap { $0 }.joined(separator: "\n")
+            addToolTip(rect(for: programme), owner: text as NSString, userData: nil)
         }
     }
 

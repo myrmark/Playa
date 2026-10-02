@@ -6,8 +6,35 @@ import UniformTypeIdentifiers
 enum ChannelFilter: Hashable {
     case all
     case favourites
+    case recent
     case list(UUID)
     case group(String)
+
+    /// For remembering which one to open at launch.
+    var storageValue: String {
+        switch self {
+        case .all: "all"
+        case .favourites: "favourites"
+        case .recent: "recent"
+        case .list(let id): "list:\(id.uuidString)"
+        case .group(let name): "group:\(name)"
+        }
+    }
+
+    init?(storageValue: String) {
+        switch storageValue {
+        case "all": self = .all
+        case "favourites": self = .favourites
+        case "recent": self = .recent
+        case let value where value.hasPrefix("list:"):
+            guard let id = UUID(uuidString: String(value.dropFirst(5))) else { return nil }
+            self = .list(id)
+        case let value where value.hasPrefix("group:"):
+            self = .group(String(value.dropFirst(6)))
+        default:
+            return nil
+        }
+    }
 }
 
 /// What the list-name prompt is for.
@@ -53,6 +80,36 @@ struct ContentView: View {
     @State private var listName = ""
     @State private var listToDelete: ChannelList?
     @State private var showingGroupChooser = false
+    /// The section and filter to open at launch, as "live|group:Sweden"; empty for none.
+    @AppStorage("startFilter.mac") private var startValue = ""
+
+    private var currentStartValue: String { "\(section.rawValue)|\(filter.storageValue)" }
+
+    private var filterTitle: String {
+        switch filter {
+        case .all: section.allTitle
+        case .favourites: "Favourites"
+        case .recent: "Recently Watched"
+        case .list: currentList?.name ?? "List"
+        case .group(let name): name
+        }
+    }
+
+    /// Opens what the user pinned, if it still exists in this playlist.
+    private func openStartFilter() {
+        let parts = startValue.split(separator: "|", maxSplits: 1).map(String.init)
+        guard parts.count == 2, let kind = ChannelKind(rawValue: parts[0]), store.playlist.countByKind[kind] != nil,
+              let wanted = ChannelFilter(storageValue: parts[1])
+        else { return }
+        switch wanted {
+        case .list(let id): guard store.lists.contains(where: { $0.id == id }) else { return }
+        case .group(let name): guard store.visibleGroups(kind).contains(name) else { return }
+        case .all, .favourites, .recent: break
+        }
+        section = kind
+        // Changing the section resets a group filter, so the filter is set once that has happened.
+        DispatchQueue.main.async { filter = wanted }
+    }
 
     /// The list the sidebar is showing, if it is showing one.
     private var currentList: ChannelList? {
@@ -73,6 +130,13 @@ struct ContentView: View {
                 isHeld: holdsPlayback,
                 release: { holdsPlayback = false },
                 playlistError: store.errorMessage,
+                noteWatched: { channel in
+                    // An episode also brings its show to the front of the recent shows.
+                    let show = store.playlist.shows.first { show in
+                        channel.kind == .series && show.seasons.contains { $0.episodes.contains { $0.channelID == channel.id } }
+                    }
+                    store.noteWatched([channel.key] + (show.map { [$0.favouriteKey] } ?? []))
+                },
                 zap: zap,
                 spaceTogglesPause: !isSearching,
                 programmes: epg.guide.nowAndNext(channelID: selectedChannel?.tvgID, at: now),
@@ -88,6 +152,7 @@ struct ContentView: View {
                     guide: epg.guide,
                     favourites: store.favourites,
                     lists: store.lists,
+                    recents: store.recents,
                     hiddenGroups: store.hiddenGroups,
                     now: now,
                     initialFilter: guideStartFilter,
@@ -171,6 +236,7 @@ struct ContentView: View {
         }
         .task {
             await store.loadOnLaunch()
+            openStartFilter()
             if store.saved.isEmpty {
                 showingPlaylistSheet = true
             } else if let last = store.lastChannelURL,
@@ -199,6 +265,11 @@ struct ContentView: View {
         .onReceive(store.$favourites) { favourites in
             if filter == .favourites {
                 updateVisibleChannels(in: store.playlist, favourites: favourites)
+            }
+        }
+        .onReceive(store.$recents) { recents in
+            if filter == .recent {
+                updateVisibleChannels(in: store.playlist, favourites: store.favourites, recents: recents)
             }
         }
         .onReceive(store.$lists) { lists in
@@ -249,15 +320,18 @@ struct ContentView: View {
     /// takes long enough to make typing in the search field stutter.
     private func updateVisibleChannels(
         in playlist: Playlist, favourites: Set<String>, lists: [ChannelList]? = nil, hidden: Set<String>? = nil,
-        afterTyping: Bool = false
+        recents: [String]? = nil, afterTyping: Bool = false
     ) {
+        // Lists and Recently Watched have an order of their own; everything else follows the playlist.
+        var ordered: [String]?
+        if case .list(let id) = filter { ordered = (lists ?? store.lists).first { $0.id == id }?.keys }
+        if filter == .recent { ordered = recents ?? store.recents }
         filterTask?.cancel()
         let section = section, filter = filter, searchText = searchText
         // Only groups of this section matter, by name.
         let prefix = PlaylistStore.hiddenKey(group: "", kind: section)
         let hiddenGroups = Set((hidden ?? store.hiddenGroups).filter { $0.hasPrefix(prefix) }.map { String($0.dropFirst(prefix.count)) })
-        var list: ChannelList?
-        if case .list(let id) = filter { list = (lists ?? store.lists).first { $0.id == id } }
+
         filterTask = Task {
             if afterTyping {
                 // Wait for a pause in typing instead of filtering on every keystroke.
@@ -267,7 +341,7 @@ struct ContentView: View {
             let result = await Task.detached(priority: .userInitiated) {
                 Self.visibleItems(
                     in: playlist, section: section, filter: filter, searchText: searchText,
-                    favourites: favourites, list: list, hiddenGroups: hiddenGroups
+                    favourites: favourites, ordered: ordered, hiddenGroups: hiddenGroups
                 )
             }.value
             if Task.isCancelled { return }
@@ -279,26 +353,26 @@ struct ContentView: View {
 
     private nonisolated static func visibleItems(
         in playlist: Playlist, section: ChannelKind, filter: ChannelFilter, searchText: String, favourites: Set<String>,
-        list: ChannelList?, hiddenGroups: Set<String>
+        ordered: [String]?, hiddenGroups: Set<String>
     ) -> (channels: [Channel], shows: [SeriesShow]) {
         func matchesSearch(_ name: String) -> Bool {
             searchText.isEmpty || name.range(of: searchText, options: [.caseInsensitive, .diacriticInsensitive]) != nil
         }
-        let members = Set(list?.keys ?? [])
+        let members = Set(ordered ?? [])
         // A list keeps the order its owner gave it, not the playlist's.
-        let position = Dictionary((list?.keys ?? []).enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+        let position = Dictionary((ordered ?? []).enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
         if section == .series {
             // Series are browsed by show; the episode list comes from the open show.
             let shows = playlist.shows.filter { show in
                 switch filter {
                 case .all: guard !hiddenGroups.contains(show.group) else { return false }
                 case .favourites: guard favourites.contains(show.favouriteKey) else { return false }
-                case .list: guard members.contains(show.favouriteKey) else { return false }
+                case .list, .recent: guard members.contains(show.favouriteKey) else { return false }
                 case .group(let group): guard show.group == group else { return false }
                 }
                 return matchesSearch(show.name)
             }
-            if list != nil {
+            if ordered != nil {
                 return ([], shows.sorted { (position[$0.favouriteKey] ?? 0) < (position[$1.favouriteKey] ?? 0) })
             }
             return ([], shows)
@@ -311,12 +385,12 @@ struct ContentView: View {
             switch filter {
             case .all: guard !hiddenGroups.contains(channel.group) else { return false }
             case .favourites: guard favourites.contains(channel.key) else { return false }
-            case .list: guard members.contains(channel.key) else { return false }
+            case .list, .recent: guard members.contains(channel.key) else { return false }
             case .group(let group): guard channel.group == group else { return false }
             }
             return matchesSearch(channel.name)
         }
-        if list != nil {
+        if ordered != nil {
             return (channels.sorted { (position[$0.key] ?? 0) < (position[$1.key] ?? 0) }, [])
         }
         return (channels, [])
@@ -398,6 +472,10 @@ struct ContentView: View {
                 Button("Delete “\(list.name)”…", role: .destructive) { listToDelete = list }
             }
             Divider()
+            Toggle("Open “\(filterTitle)” at Launch", isOn: Binding(
+                get: { startValue == currentStartValue },
+                set: { startValue = $0 ? currentStartValue : "" }
+            ))
             Button("Choose Groups…") { showingGroupChooser = true }
         } label: {
             Image(systemName: "ellipsis.circle")
@@ -519,6 +597,7 @@ struct ContentView: View {
                         ? "\(section.allTitle) (\(section == .series ? store.playlist.shows.count : store.playlist.countByKind[section] ?? 0))"
                         : section.allTitle).tag(ChannelFilter.all)
                     Label("Favourites", systemImage: "star.fill").tag(ChannelFilter.favourites)
+                    Label("Recently Watched", systemImage: "clock").tag(ChannelFilter.recent)
                     ForEach(store.lists) { list in
                         Label(list.name, systemImage: "list.bullet").tag(ChannelFilter.list(list.id))
                     }
@@ -582,6 +661,8 @@ struct ContentView: View {
                     ContentUnavailableView("No favourites yet", systemImage: "star", description: Text(section == .series
                         ? "Right-click a show to add it."
                         : "Right-click a channel, or press ⌘D while watching, to add it."))
+                } else if isListEmpty && filter == .recent && searchText.isEmpty {
+                    ContentUnavailableView("Nothing watched yet", systemImage: "clock", description: Text("What you watch for more than a few seconds shows up here."))
                 } else if isListEmpty, let list = currentList, searchText.isEmpty {
                     ContentUnavailableView("“\(list.name)” is empty here", systemImage: "list.bullet", description: Text(section == .series
                         ? "Right-click a show and choose Add to List."
@@ -641,6 +722,8 @@ private struct PlayerPane: View {
     let isHeld: Bool
     let release: () -> Void
     let playlistError: String?
+    /// Called once a channel has been on for a little while, to record it as recently watched.
+    let noteWatched: (Channel) -> Void
     let zap: (Int) -> Void
     /// Off while the search field has focus, so a space can be typed there.
     let spaceTogglesPause: Bool
@@ -653,6 +736,7 @@ private struct PlayerPane: View {
     @State private var scrubPosition: Double?
     /// What the player is showing, kept so its position can be saved when the selection moves on.
     @State private var playing: Channel?
+    @State private var watchTask: Task<Void, Never>?
 
     var body: some View {
         ZStack {
@@ -713,6 +797,12 @@ private struct PlayerPane: View {
         savePosition(isFinal: true)
         playing = channel
         player.play(url: channel.url, startAt: resume.resumePosition(for: channel), isLive: channel.kind == .live)
+        // Zapping past a channel shouldn't count as watching it.
+        watchTask?.cancel()
+        watchTask = Task {
+            try? await Task.sleep(for: .seconds(15))
+            if !Task.isCancelled, playing?.url == channel.url { noteWatched(channel) }
+        }
     }
 
     private func savePosition(isFinal: Bool) {
@@ -850,6 +940,8 @@ private struct PlayerPane: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                        // Hovering shows what the current programme is about, when the guide says.
+                        .help(programmes.now?.description ?? "")
                 }
             }
             Button(action: toggleFavourite) {

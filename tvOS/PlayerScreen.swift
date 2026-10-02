@@ -5,6 +5,8 @@ import UIKit
 /// What the player was opened with: the list the channel came from, so up/down can zap through it.
 struct PlayerSession: Identifiable {
     let id = UUID()
+    /// For episodes: the show they belong to, so it can be recorded as recently watched.
+    var showKey: String?
     let channels: [Channel]
     let index: Int
 }
@@ -15,6 +17,7 @@ struct PlayerScreen: View {
     @EnvironmentObject private var player: MPVPlayer
     @EnvironmentObject private var epg: EPGStore
     @EnvironmentObject private var resume: ResumeStore
+    @EnvironmentObject private var store: PlaylistStore
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
 
@@ -22,6 +25,7 @@ struct PlayerScreen: View {
     @State private var showsInfo = true
     @State private var infoToken = 0
     @State private var showsTracks = false
+    @State private var watchTask: Task<Void, Never>?
 
     private var channel: Channel { session.channels[index] }
     private var isLive: Bool { channel.kind == .live }
@@ -137,6 +141,12 @@ struct PlayerScreen: View {
                     if let now = programmes.now {
                         Text("Now: \(now.title)  ·  \(now.start.formatted(date: .omitted, time: .shortened))–\(now.stop.formatted(date: .omitted, time: .shortened))")
                             .foregroundStyle(.secondary)
+                        if let description = now.description {
+                            Text(description)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(3)
+                        }
                     }
                     if let next = programmes.next {
                         Text("Next: \(next.title)  ·  \(next.start.formatted(date: .omitted, time: .shortened))")
@@ -168,6 +178,15 @@ struct PlayerScreen: View {
     private func start() {
         player.play(url: channel.url, startAt: resume.resumePosition(for: channel), isLive: isLive)
         flashInfo()
+        // Zapping past a channel shouldn't count as watching it.
+        let started = channel
+        watchTask?.cancel()
+        watchTask = Task {
+            try? await Task.sleep(for: .seconds(15))
+            if !Task.isCancelled, channel.url == started.url {
+                store.noteWatched([started.key] + (session.showKey.map { [$0] } ?? []))
+            }
+        }
     }
 
     private func zap(_ offset: Int) {
@@ -199,6 +218,7 @@ struct PlayerScreen: View {
     }
 
     private func close() {
+        watchTask?.cancel()
         savePosition(isFinal: true)
         player.stop()
     }

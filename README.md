@@ -14,8 +14,8 @@ Playa is a player only. It ships with no channels or streams; you bring your own
 
 - **Playlists**: add several M3U playlists by URL or from a file and switch between them. Playlists are cached, so the app opens instantly and refreshes in the background.
 - **Live TV, Films and Series**: provider playlists that mix all three are split into sections. Series are grouped into shows and seasons.
-- **TV guide**: now/next on every channel, plus a full-window schedule grid. The guide is read from the playlist's XMLTV address, or found automatically for Xtream-style `get.php` playlists.
-- **Favourites and lists**: star channels, films and shows, or collect them in your own named lists and arrange them in any order.
+- **TV guide**: now/next on every channel with programme descriptions, plus a full-window schedule grid. The guide is read from the playlist's XMLTV address, or found automatically for Xtream-style `get.php` playlists.
+- **Favourites and lists**: star channels, films and shows, or collect them in your own named lists and arrange them in any order. A Recently Watched list keeps itself.
 - **Hide groups** you never use, so a provider's hundreds of groups shrink to the ones you care about.
 - **Search** across channels, films and shows.
 - **Plays almost anything**: playback uses [mpv](https://mpv.io), with hardware decoding and Metal rendering.
@@ -57,7 +57,7 @@ Without a `Local.xcconfig`, `./build-app.sh` signs ad-hoc. That is fine for runn
 
 ## Sync between devices
 
-Playlists, favourites, lists, hidden groups and resume positions sync through the user's own iCloud account (key-value storage) between Playa on their devices; nothing passes through any other server. Favourites, lists and resume positions are stored as fingerprints of the stream addresses, never the addresses themselves. Playlist addresses, which include the provider login, are stored as they are, under Apple's standard iCloud encryption (in transit and at rest, not end to end). Playlists added from a file are not synced.
+Playlists, favourites, lists, recently watched, hidden groups and resume positions sync through the user's own iCloud account (key-value storage) between Playa on their devices; nothing passes through any other server. Favourites, lists and resume positions are stored as fingerprints of the stream addresses, never the addresses themselves. Playlist addresses, which include the provider login, are stored as they are, under Apple's standard iCloud encryption (in transit and at rest, not end to end). Playlists added from a file are not synced.
 
 `Playa.app/Contents/MacOS/Playa --diagnose` prints the storage and sync state.
 

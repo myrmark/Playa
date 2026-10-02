@@ -27,10 +27,11 @@ struct ShowPane: View {
             return store.playlist.shows.filter { store.favourites.contains($0.favouriteKey) }
         case .group(let group):
             return store.playlist.shows.filter { $0.group == group }
-        case .list(let id):
-            guard let list = store.lists.first(where: { $0.id == id }) else { return [] }
-            // A list keeps the order its owner gave it.
-            let position = Dictionary(list.keys.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+        case .list, .recent:
+            // Lists and Recently Watched have an order of their own.
+            var keys = store.recents
+            if case .list(let id) = filter { keys = store.lists.first { $0.id == id }?.keys ?? [] }
+            let position = Dictionary(keys.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
             return store.playlist.shows.filter { position[$0.favouriteKey] != nil }
                 .sorted { (position[$0.favouriteKey] ?? 0) < (position[$1.favouriteKey] ?? 0) }
         }
@@ -65,6 +66,7 @@ struct ShowPane: View {
     private var emptyText: String {
         switch filter {
         case .favourites: "No favourite shows yet. Hold the select button on a show to add it."
+        case .recent: "No shows watched yet."
         case .list: "This list has no shows yet. Hold the select button on a show to add it."
         case .group: "Nothing in this group."
         }
@@ -130,6 +132,7 @@ struct EpisodeList: View {
                     ForEach(entries, id: \.channel.id) { entry in
                         ChannelRow(channel: entry.channel, title: entry.episode.label, now: Date()) {
                             session = PlayerSession(
+                                showKey: show.favouriteKey,
                                 channels: entries.map(\.channel),
                                 index: entries.firstIndex { $0.channel.id == entry.channel.id } ?? 0
                             )

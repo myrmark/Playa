@@ -34,6 +34,8 @@ final class EPGTests: XCTestCase {
         let current = guide.nowAndNext(channelID: "SVT1.se", at: now)
         XCTAssertEqual(current.now?.title, "Sportnytt")
         XCTAssertEqual(current.next?.title, "Rapport")
+        XCTAssertEqual(current.next?.description, "News")
+        XCTAssertNil(current.now?.description)
 
         let gap = guide.nowAndNext(channelID: "svt1.se", at: now.addingTimeInterval(-3600))
         XCTAssertNil(gap.now)
