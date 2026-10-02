@@ -47,6 +47,8 @@ SYNC AND PRIVACY
 • No accounts, no ads, no tracking
 • One purchase covers both Mac and Apple TV
 
+Screenshots show Big Buck Bunny and Sintel, © Blender Foundation, licensed under CC BY 3.0.
+
 ## Keywords (100 characters max)
 iptv,m3u,player,tv,guide,epg,xtream,playlist,live,stream,channels,series,films
 
