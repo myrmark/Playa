@@ -1,6 +1,9 @@
 import Foundation
 import Libmpv
 import QuartzCore
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// Thin wrapper around a libmpv handle. mpv draws straight into `videoLayer`
 /// with Metal (through MoltenVK), on its own thread.
@@ -15,9 +18,9 @@ final class MPVPlayer: ObservableObject {
         var id: String { "\(kind)-\(trackID)" }
     }
 
-    @Published var isPaused = false
+    @Published var isPaused = false { didSet { updateKeepAwake() } }
     @Published var isBuffering = false
-    @Published var errorMessage: String?
+    @Published var errorMessage: String? { didSet { updateKeepAwake() } }
     /// True while a dropped live stream is being reopened.
     @Published private(set) var isReconnecting = false
     /// True when a live stream stopped and can be reopened by hand.
@@ -64,7 +67,29 @@ final class MPVPlayer: ObservableObject {
     private var resizeWork: DispatchWorkItem?
 
     // Reconnect bookkeeping; main thread only.
-    private var currentURL: String?
+    private var currentURL: String? { didSet { updateKeepAwake() } }
+    #if os(macOS)
+    private var awakeActivity: NSObjectProtocol?
+    #endif
+
+    /// Watching involves no input, so the system would otherwise start the screen saver or
+    /// sleep the display mid-programme. Held only while something is actually playing.
+    private func updateKeepAwake() {
+        let isPlaying = currentURL != nil && !isPaused && errorMessage == nil
+        DispatchQueue.main.async { [self] in
+            #if os(macOS)
+            if isPlaying, awakeActivity == nil {
+                awakeActivity = ProcessInfo.processInfo.beginActivity(
+                    options: [.idleDisplaySleepDisabled, .userInitiated], reason: "Playing video")
+            } else if !isPlaying, let activity = awakeActivity {
+                ProcessInfo.processInfo.endActivity(activity)
+                awakeActivity = nil
+            }
+            #else
+            UIApplication.shared.isIdleTimerDisabled = isPlaying
+            #endif
+        }
+    }
     private var isLive = false
     /// Whether the current stream has shown a picture at least once.
     private var hasStarted = false
