@@ -15,6 +15,7 @@ struct FollowingTab: View {
         let guideVersion: Int
         let channelCount: Int
         let favourites: Set<String>
+        let lists: [ChannelList]
         let hiddenGroups: Set<String>
     }
 
@@ -49,9 +50,13 @@ struct FollowingTab: View {
             .navigationTitle("Following")
             .task(id: Inputs(
                 topics: following.topics, preferences: following.preferences, guideVersion: epg.version,
-                channelCount: store.playlist.channels.count, favourites: store.favourites, hiddenGroups: store.hiddenGroups
+                channelCount: store.playlist.channels.count, favourites: store.favourites, lists: store.lists,
+                hiddenGroups: store.hiddenGroups
             )) {
-                following.search(guide: epg.guide, playlist: store.playlist, favourites: store.favourites, hiddenGroups: store.hiddenGroups)
+                following.search(
+                    guide: epg.guide, playlist: store.playlist, favourites: store.favourites, lists: store.lists,
+                    hiddenGroups: store.hiddenGroups
+                )
             }
             .fullScreenCover(item: $session) { session in
                 #if os(tvOS)
@@ -132,6 +137,7 @@ private struct BroadcastRow: View {
 /// Choose what to follow, and how to pick between channels showing the same thing.
 struct FollowingTopicsView: View {
     @EnvironmentObject private var following: FollowingStore
+    @EnvironmentObject private var store: PlaylistStore
     @State private var languageText = ""
 
     var body: some View {
@@ -141,8 +147,9 @@ struct FollowingTopicsView: View {
                     Toggle(isOn: Binding(get: { topic.isEnabled }, set: { following.setEnabled($0, for: topic.id) })) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(topic.name)
-                            if !topic.keywords.isEmpty {
-                                Text(topic.keywords.joined(separator: ", "))
+                            let details = [topic.keywords.joined(separator: ", "), topic.scopeName(in: store.lists).map { "in \($0)" } ?? ""].filter { !$0.isEmpty }
+                            if !details.isEmpty {
+                                Text(details.joined(separator: " · "))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -186,9 +193,11 @@ struct FollowingTopicForm: View {
     let topic: FollowedTopic?
 
     @EnvironmentObject private var following: FollowingStore
+    @EnvironmentObject private var store: PlaylistStore
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var keywords = ""
+    @State private var scope: FollowScope?
 
     var body: some View {
         Form {
@@ -201,9 +210,24 @@ struct FollowingTopicForm: View {
                 Text("Playa looks through the TV guide for programmes that mention the name or any of the other keywords, in their title or description. Separate keywords with commas.")
             }
             Section {
+                Picker("Look on", selection: $scope) {
+                    Text("All channels").tag(FollowScope?.none)
+                    Text("Favourites").tag(FollowScope?.some(.favourites))
+                    ForEach(store.lists) { list in
+                        Text(list.name).tag(FollowScope?.some(.list(list.id)))
+                    }
+                }
+            } footer: {
+                Text("Limiting it to a list, such as your sports channels, keeps out unrelated programmes that happen to mention the name.")
+            }
+            Section {
                 Button(topic == nil ? "Follow" : "Save") {
                     let words = FollowingStore.keywords(from: keywords)
-                    if let topic { following.update(topic.id, name: name, keywords: words) } else { following.add(name: name, keywords: words) }
+                    if let topic {
+                        following.update(topic.id, name: name, keywords: words, scope: scope)
+                    } else {
+                        following.add(name: name, keywords: words, scope: scope)
+                    }
                     dismiss()
                 }
                 .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -213,6 +237,7 @@ struct FollowingTopicForm: View {
         .onAppear {
             name = topic?.name ?? ""
             keywords = topic?.keywords.joined(separator: ", ") ?? ""
+            scope = topic?.scope
         }
     }
 }

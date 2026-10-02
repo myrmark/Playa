@@ -1,5 +1,11 @@
 import Foundation
 
+/// Which channels a followed topic is looked for on.
+public enum FollowScope: Codable, Hashable, Sendable {
+    case favourites
+    case list(UUID)
+}
+
 /// Something the user follows in the TV guide: a team, a sport, a show. Programmes that
 /// mention its name or any of its other keywords count as broadcasts of it.
 public struct FollowedTopic: Identifiable, Codable, Hashable, Sendable {
@@ -9,12 +15,17 @@ public struct FollowedTopic: Identifiable, Codable, Hashable, Sendable {
     public var keywords: [String]
     /// Topics can be switched off without deleting them.
     public var isEnabled: Bool
+    /// Limits the search to the user's favourites or one of their lists; nil means every channel.
+    /// A team name alone matches all sorts of programmes, so narrowing it to, say, a list of
+    /// sports channels keeps the results to the point.
+    public var scope: FollowScope?
 
-    public init(id: UUID = UUID(), name: String, keywords: [String] = [], isEnabled: Bool = true) {
+    public init(id: UUID = UUID(), name: String, keywords: [String] = [], isEnabled: Bool = true, scope: FollowScope? = nil) {
         self.id = id
         self.name = name
         self.keywords = keywords
         self.isEnabled = isEnabled
+        self.scope = scope
     }
 
     /// Everything a programme is searched for: the name and the keywords.
@@ -49,11 +60,22 @@ public enum Following {
     /// programme on several channels becomes one broadcast listing all of them.
     public static func broadcasts(
         topics: [FollowedTopic], guide: Guide, playlist: Playlist, from date: Date, horizon: TimeInterval,
-        favourites: Set<String> = [], preferences: FollowPreferences = FollowPreferences(),
+        favourites: Set<String> = [], lists: [ChannelList] = [], preferences: FollowPreferences = FollowPreferences(),
         hiddenGroups: Set<String> = [], limit: Int = 300
     ) -> [Broadcast] {
         let active = topics.filter { $0.isEnabled && !$0.searchTerms.isEmpty }
         guard !active.isEmpty, !guide.isEmpty else { return [] }
+
+        // The channel keys each topic is limited to; a topic without an entry looks everywhere.
+        // A scope naming a list that no longer exists is treated as no limit.
+        var allowedKeys: [UUID: Set<String>] = [:]
+        for topic in active {
+            switch topic.scope {
+            case .favourites?: allowedKeys[topic.id] = favourites
+            case .list(let id)?: allowedKeys[topic.id] = lists.first { $0.id == id }.map { Set($0.keys) }
+            case nil: break
+            }
+        }
 
         var channelsByGuideID: [String: [Channel]] = [:]
         for channel in playlist.channels where channel.kind == .live && !hiddenGroups.contains(channel.group) {
@@ -74,14 +96,24 @@ public enum Following {
         let end = date.addingTimeInterval(horizon)
         for (guideID, channels) in channelsByGuideID {
             for programme in guide.programmes(channelID: guideID, from: date, to: end) {
-                let matched = active.filter { topic in topic.searchTerms.contains { mentions(programme, $0) } }.map(\.name)
+                var matched: [String] = []
+                var showing: [Channel] = []
+                for topic in active where topic.searchTerms.contains(where: { mentions(programme, $0) }) {
+                    // Only the channels this topic is allowed on count for it.
+                    let allowed = allowedKeys[topic.id].map { keys in channels.filter { keys.contains($0.key) } } ?? channels
+                    guard !allowed.isEmpty else { continue }
+                    matched.append(topic.name)
+                    for channel in allowed where !showing.contains(where: { $0.id == channel.id }) { showing.append(channel) }
+                }
                 guard !matched.isEmpty else { continue }
                 // The same event at the same time under the same title is one broadcast.
                 let key = "\(Int(programme.start.timeIntervalSince1970 / 60))|\(programme.title.lowercased())"
                 if found[key] == nil {
-                    found[key] = Found(programme: programme, topics: matched, channels: channels)
+                    found[key] = Found(programme: programme, topics: matched, channels: showing)
                 } else {
-                    found[key]?.channels += channels
+                    for channel in showing where found[key]?.channels.contains(where: { $0.id == channel.id }) == false {
+                        found[key]?.channels.append(channel)
+                    }
                     for name in matched where found[key]?.topics.contains(name) == false { found[key]?.topics.append(name) }
                 }
             }

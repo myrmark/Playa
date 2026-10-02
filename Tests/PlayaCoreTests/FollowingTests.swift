@@ -45,6 +45,27 @@ final class FollowingTests: XCTestCase {
         )
         XCTAssertEqual(both.last?.topics, ["Arsenal"])
         XCTAssertTrue(Following.broadcasts(topics: [], guide: guide, playlist: playlist, from: now, horizon: 86_400).isEmpty)
+
+        // Limited to a list of sports channels, the news programme that merely mentions Sweden is gone.
+        let sports = ChannelList(name: "Sports", keys: [playlist.channels[1].key, playlist.channels[2].key])
+        let inList = Following.broadcasts(
+            topics: [FollowedTopic(name: "Sweden", keywords: ["Sverige"], scope: .list(sports.id))],
+            guide: guide, playlist: playlist, from: now, horizon: 7 * 86_400, lists: [sports]
+        )
+        XCTAssertEqual(inList.map(\.programme.title), ["Fotboll: Nations League"])
+        XCTAssertEqual(Set(inList[0].channels.map(\.name)), ["Sky Sports EN", "V Sport 1 FHD SE"], "only the channels in the list")
+
+        let inFavourites = Following.broadcasts(
+            topics: [FollowedTopic(name: "Sweden", scope: .favourites)],
+            guide: guide, playlist: playlist, from: now, horizon: 7 * 86_400, favourites: [playlist.channels[3].key]
+        )
+        XCTAssertEqual(inFavourites.map(\.programme.title), ["Sweden Today"])
+
+        let missingList = Following.broadcasts(
+            topics: [FollowedTopic(name: "Sweden", scope: .list(UUID()))],
+            guide: guide, playlist: playlist, from: now, horizon: 7 * 86_400
+        )
+        XCTAssertEqual(missingList.count, 2, "a deleted list means no limit")
     }
 
     func testLanguageMarkersMustStandAlone() {
@@ -57,8 +78,11 @@ final class FollowingTests: XCTestCase {
     }
 
     func testTopicsSurviveEncoding() throws {
-        let topic = FollowedTopic(name: "Sweden", keywords: ["Sverige"], isEnabled: false)
+        let topic = FollowedTopic(name: "Sweden", keywords: ["Sverige"], isEnabled: false, scope: .list(UUID()))
         XCTAssertEqual(try JSONDecoder().decode(FollowedTopic.self, from: JSONEncoder().encode(topic)), topic)
+        // Topics saved before scopes existed still load.
+        let old = Data(#"{"id":"11111111-2222-3333-4444-555555555555","name":"Sweden","keywords":[],"isEnabled":true}"#.utf8)
+        XCTAssertNil(try JSONDecoder().decode(FollowedTopic.self, from: old).scope)
         XCTAssertEqual(topic.searchTerms, ["Sweden", "Sverige"])
     }
 }

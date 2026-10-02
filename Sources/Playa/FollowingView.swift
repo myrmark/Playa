@@ -8,6 +8,7 @@ struct FollowingView: View {
     let guide: Guide
     let guideVersion: Int
     let favourites: Set<String>
+    let lists: [ChannelList]
     let hiddenGroups: Set<String>
     let now: Date
     let onPlay: (Channel) -> Void
@@ -22,6 +23,7 @@ struct FollowingView: View {
         let preferences: FollowPreferences
         let guideVersion: Int
         let favourites: Set<String>
+        let lists: [ChannelList]
         let hiddenGroups: Set<String>
     }
 
@@ -37,13 +39,17 @@ struct FollowingView: View {
             }
         }
         .background(.background)
-        .task(id: Inputs(topics: following.topics, preferences: following.preferences, guideVersion: guideVersion, favourites: favourites, hiddenGroups: hiddenGroups)) {
-            following.search(guide: guide, playlist: playlist, favourites: favourites, hiddenGroups: hiddenGroups)
+        .task(id: Inputs(topics: following.topics, preferences: following.preferences, guideVersion: guideVersion, favourites: favourites, lists: lists, hiddenGroups: hiddenGroups)) {
+            following.search(guide: guide, playlist: playlist, favourites: favourites, lists: lists, hiddenGroups: hiddenGroups)
         }
         .onAppear { languageText = following.preferences.languageTags.joined(separator: ", ") }
         .sheet(item: $editing) { draft in
-            TopicEditor(draft: draft) { name, keywords in
-                if let id = draft.existing { following.update(id, name: name, keywords: keywords) } else { following.add(name: name, keywords: keywords) }
+            TopicEditor(draft: draft, lists: lists) { name, keywords, scope in
+                if let id = draft.existing {
+                    following.update(id, name: name, keywords: keywords, scope: scope)
+                } else {
+                    following.add(name: name, keywords: keywords, scope: scope)
+                }
             }
         }
     }
@@ -81,8 +87,9 @@ struct FollowingView: View {
                     Toggle(isOn: Binding(get: { topic.isEnabled }, set: { following.setEnabled($0, for: topic.id) })) {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(topic.name)
-                            if !topic.keywords.isEmpty {
-                                Text(topic.keywords.joined(separator: ", "))
+                            let details = [topic.keywords.joined(separator: ", "), topic.scopeName(in: lists).map { "in \($0)" } ?? ""].filter { !$0.isEmpty }
+                            if !details.isEmpty {
+                                Text(details.joined(separator: " · "))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
@@ -214,6 +221,7 @@ struct TopicDraft: Identifiable {
     var existing: UUID?
     var name = ""
     var keywords = ""
+    var scope: FollowScope?
 
     init() {}
 
@@ -221,16 +229,19 @@ struct TopicDraft: Identifiable {
         existing = topic.id
         name = topic.name
         keywords = topic.keywords.joined(separator: ", ")
+        scope = topic.scope
     }
 }
 
 private struct TopicEditor: View {
     let draft: TopicDraft
-    let onSave: (String, [String]) -> Void
+    let lists: [ChannelList]
+    let onSave: (String, [String], FollowScope?) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var keywords = ""
+    @State private var scope: FollowScope?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -243,12 +254,23 @@ private struct TopicEditor: View {
                 .textFieldStyle(.roundedBorder)
             TextField("Other keywords, separated by commas: Sverige, SWE", text: $keywords)
                 .textFieldStyle(.roundedBorder)
+            Picker("Look on", selection: $scope) {
+                Text("All channels").tag(FollowScope?.none)
+                Label("Favourites", systemImage: "star.fill").tag(FollowScope?.some(.favourites))
+                ForEach(lists) { list in
+                    Label(list.name, systemImage: "list.bullet").tag(FollowScope?.some(.list(list.id)))
+                }
+            }
+            Text("Limiting it to a list, such as your sports channels, keeps out unrelated programmes that happen to mention the name.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Button(draft.existing == nil ? "Follow" : "Save") {
-                    onSave(name, FollowingStore.keywords(from: keywords))
+                    onSave(name, FollowingStore.keywords(from: keywords), scope)
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
@@ -260,6 +282,7 @@ private struct TopicEditor: View {
         .onAppear {
             name = draft.name
             keywords = draft.keywords
+            scope = draft.scope
         }
     }
 }

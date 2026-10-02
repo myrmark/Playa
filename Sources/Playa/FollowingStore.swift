@@ -41,15 +41,16 @@ final class FollowingStore: ObservableObject {
         }
     }
 
-    func add(name: String, keywords: [String]) {
-        topics.append(FollowedTopic(name: name.trimmingCharacters(in: .whitespaces), keywords: keywords))
+    func add(name: String, keywords: [String], scope: FollowScope?) {
+        topics.append(FollowedTopic(name: name.trimmingCharacters(in: .whitespaces), keywords: keywords, scope: scope))
         changed()
     }
 
-    func update(_ id: UUID, name: String, keywords: [String]) {
+    func update(_ id: UUID, name: String, keywords: [String], scope: FollowScope?) {
         guard let index = topics.firstIndex(where: { $0.id == id }) else { return }
         topics[index].name = name.trimmingCharacters(in: .whitespaces)
         topics[index].keywords = keywords
+        topics[index].scope = scope
         changed()
     }
 
@@ -104,7 +105,7 @@ final class FollowingStore: ObservableObject {
     }
 
     /// Looks through the guide again. Call when the topics, the guide or the favourites change.
-    func search(guide: Guide, playlist: Playlist, favourites: Set<String>, hiddenGroups: Set<String>) {
+    func search(guide: Guide, playlist: Playlist, favourites: Set<String>, lists: [ChannelList], hiddenGroups: Set<String>) {
         searchTask?.cancel()
         let topics = topics, preferences = preferences
         // Hidden groups are stored per section; only the live ones matter to the guide.
@@ -114,12 +115,23 @@ final class FollowingStore: ObservableObject {
             let found = await Task.detached(priority: .userInitiated) {
                 Following.broadcasts(
                     topics: topics, guide: guide, playlist: playlist, from: Date(), horizon: Self.horizon,
-                    favourites: favourites, preferences: preferences, hiddenGroups: hiddenLive
+                    favourites: favourites, lists: lists, preferences: preferences, hiddenGroups: hiddenLive
                 )
             }.value
             if Task.isCancelled { return }
             broadcasts = found
             isSearching = false
+        }
+    }
+}
+
+extension FollowedTopic {
+    /// Where the topic is looked for, in words; nil when it is every channel.
+    func scopeName(in lists: [ChannelList]) -> String? {
+        switch scope {
+        case .favourites?: "Favourites"
+        case .list(let id)?: lists.first { $0.id == id }?.name
+        case nil: nil
         }
     }
 }

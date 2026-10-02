@@ -178,6 +178,7 @@ struct ContentView: View {
                     guide: epg.guide,
                     guideVersion: epg.version,
                     favourites: store.favourites,
+                    lists: store.lists,
                     hiddenGroups: store.hiddenGroups,
                     now: now,
                     onPlay: { channel in
