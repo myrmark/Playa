@@ -312,7 +312,7 @@ struct ChannelPane: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let channels {
                 VStack(spacing: 0) {
-                    if canShowGuide { guideHeader }
+                    header
                     if isGuide { GuideRuler(windowStart: windowStart, windowLength: Self.windowLength) }
                     // The guide labels follow the clock.
                     TimelineView(.everyMinute) { timeline in
@@ -357,16 +357,28 @@ struct ChannelPane: View {
         }
     }
 
-    /// The List/Guide switch, and in guide mode the controls that move the timeline.
-    private var guideHeader: some View {
+    /// Refresh, the List/Guide switch, and in guide mode the controls that move the timeline.
+    private var header: some View {
         HStack(spacing: 24) {
-            Button {
-                showsGuide.toggle()
-            } label: {
-                Label(showsGuide ? "Show as List" : "Show Guide", systemImage: showsGuide ? "list.bullet" : "calendar")
+            if canShowGuide {
+                Button {
+                    showsGuide.toggle()
+                } label: {
+                    Label(showsGuide ? "Show as List" : "Show Guide", systemImage: showsGuide ? "list.bullet" : "calendar")
+                }
             }
+            Button {
+                Task { await store.refresh() }
+            } label: {
+                if store.isLoading {
+                    Label("Updating… \(store.downloadedBytes.formatted(.byteCount(style: .file)))", systemImage: "arrow.clockwise")
+                } else {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+            }
+            .disabled(store.isLoading)
             Spacer()
-            if showsGuide {
+            if isGuide {
                 Text(windowStart.formatted(.dateTime.weekday(.wide).day().month(.wide)))
                     .foregroundStyle(.secondary)
                 Button {

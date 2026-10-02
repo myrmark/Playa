@@ -50,6 +50,12 @@ struct GuideRow: View {
                 func x(_ date: Date) -> CGFloat {
                     size.width * CGFloat(min(max(date.timeIntervalSince(windowStart) / span, 0), 1))
                 }
+                if programmes.isEmpty {
+                    context.draw(
+                        Text("No programme information").font(.caption).foregroundStyle(ink.opacity(0.4)),
+                        at: CGPoint(x: 14, y: size.height / 2), anchor: .leading
+                    )
+                }
                 for programme in programmes {
                     let block = CGRect(x: x(programme.start) + 2, y: 4, width: max(x(programme.stop) - x(programme.start) - 4, 0), height: size.height - 8)
                     guard block.width > 2 else { continue }

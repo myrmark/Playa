@@ -46,6 +46,18 @@ public struct Channel: Identifiable, Hashable, Sendable {
 }
 
 extension Channel {
+    /// For restoring a channel whose key is already known, without hashing its address again.
+    init(id: Int, name: String, url: String, group: String, logo: String?, tvgID: String?, kind: ChannelKind, key: String) {
+        self.id = id
+        self.name = name
+        self.url = url
+        self.group = group
+        self.logo = logo
+        self.tvgID = tvgID
+        self.kind = kind
+        self.key = key
+    }
+
     public static func key(forStreamURL url: String) -> String {
         let digest = SHA256.hash(data: Data(url.utf8))
         return Data(digest.prefix(9)).base64EncodedString()
