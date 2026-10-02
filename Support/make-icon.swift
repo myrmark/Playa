@@ -1,4 +1,4 @@
-// Draws the LaPlaya app icon and writes Support/AppIcon.icns.
+// Draws the Playa app icon and writes Support/AppIcon.icns.
 // Run from the repository root: swift Support/make-icon.swift
 import AppKit
 

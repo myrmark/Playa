@@ -1,5 +1,5 @@
 import XCTest
-@testable import LaPlayaCore
+@testable import PlayaCore
 
 final class SeriesTests: XCTestCase {
     func testParsesEpisodeNames() {

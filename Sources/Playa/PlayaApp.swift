@@ -2,11 +2,11 @@ import AppKit
 import SwiftUI
 
 @main
-struct LaPlayaApp: App {
+struct PlayaApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        Window("LaPlaya", id: "main") {
+        Window("Playa", id: "main") {
             ContentView()
                 .frame(minWidth: 900, minHeight: 520)
         }

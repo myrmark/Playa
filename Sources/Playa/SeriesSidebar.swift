@@ -1,4 +1,4 @@
-import LaPlayaCore
+import PlayaCore
 import SwiftUI
 
 /// Sidebar content for the Series section: a list of shows that drills down into seasons and episodes.

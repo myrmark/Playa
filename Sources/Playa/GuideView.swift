@@ -1,5 +1,5 @@
 import AppKit
-import LaPlayaCore
+import PlayaCore
 import SwiftUI
 
 /// Full-window programme grid: one row per live channel, time running left to right.

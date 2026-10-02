@@ -1,5 +1,5 @@
 import Foundation
-import LaPlayaCore
+import PlayaCore
 
 /// Downloads and holds the programme guide for the active playlist.
 @MainActor
@@ -92,7 +92,7 @@ final class EPGStore: ObservableObject {
 
     private static func cacheFile(for id: UUID) -> URL {
         let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("LaPlaya", isDirectory: true)
+            .appendingPathComponent("Playa", isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory.appendingPathComponent("guide-\(id.uuidString).xml")
     }

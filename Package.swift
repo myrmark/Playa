@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "LaPlaya",
+    name: "Playa",
     platforms: [.macOS(.v14)],
     targets: [
         .systemLibrary(
@@ -10,14 +10,14 @@ let package = Package(
             pkgConfig: "mpv",
             providers: [.brew(["mpv"])]
         ),
-        .target(name: "LaPlayaCore"),
+        .target(name: "PlayaCore"),
         .executableTarget(
-            name: "LaPlaya",
-            dependencies: ["Cmpv", "LaPlayaCore"]
+            name: "Playa",
+            dependencies: ["Cmpv", "PlayaCore"]
         ),
         .testTarget(
-            name: "LaPlayaCoreTests",
-            dependencies: ["LaPlayaCore"]
+            name: "PlayaCoreTests",
+            dependencies: ["PlayaCore"]
         ),
     ]
 )

@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>LaPlaya</string>
+    <string>Playa</string>
     <key>CFBundleDisplayName</key>
-    <string>LaPlaya</string>
+    <string>Playa</string>
     <key>CFBundleIdentifier</key>
-    <string>com.filipmalmberg.LaPlaya</string>
+    <string>com.filipmalmberg.Playa</string>
     <key>CFBundleExecutable</key>
-    <string>LaPlaya</string>
+    <string>Playa</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundlePackageType</key>

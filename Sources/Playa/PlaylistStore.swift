@@ -1,5 +1,5 @@
 import Foundation
-import LaPlayaCore
+import PlayaCore
 
 struct SavedPlaylist: Identifiable, Codable, Hashable {
     var id = UUID()
@@ -219,7 +219,7 @@ final class PlaylistStore: ObservableObject {
 
     private var cacheDirectory: URL {
         let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("LaPlaya", isDirectory: true)
+            .appendingPathComponent("Playa", isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
     }

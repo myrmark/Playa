@@ -1,5 +1,5 @@
 import AppKit
-import LaPlayaCore
+import PlayaCore
 import SwiftUI
 
 /// Channel list backed by NSTableView. SwiftUI's `List` keeps per-row state for

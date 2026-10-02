@@ -1,5 +1,5 @@
 import AppKit
-import LaPlayaCore
+import PlayaCore
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -45,7 +45,7 @@ struct ContentView: View {
                 isFavourite: selectedChannel.map { store.favourites.contains($0.url) } ?? false,
                 toggleFavourite: { if let selectedChannel { store.toggleFavourite(selectedChannel) } }
             )
-                .navigationTitle(selectedChannel?.name ?? "LaPlaya")
+                .navigationTitle(selectedChannel?.name ?? "Playa")
         }
         .overlay {
             if showingGuide {
@@ -229,7 +229,7 @@ struct ContentView: View {
                 if let id = playlistToRemove?.id { Task { await store.remove(id) } }
             }
         } message: {
-            Text("The playlist is removed from LaPlaya. The original file or address is not affected.")
+            Text("The playlist is removed from Playa. The original file or address is not affected.")
         }
     }
 
