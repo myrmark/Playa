@@ -93,6 +93,7 @@ final class MPVPlayer: ObservableObject {
     private var isLive = false
     /// Whether the current stream has shown a picture at least once.
     private var hasStarted = false
+    private var stalls = 0
     private var retries = 0
     /// When the picture last (re)appeared; a reconnect only counts as successful if it then held.
     private var lastStart = Date.distantPast
@@ -157,6 +158,7 @@ final class MPVPlayer: ObservableObject {
         currentURL = url
         self.isLive = isLive
         hasStarted = false
+        stalls = 0
         retries = 0
         isReconnecting = false
         tracks = []
@@ -282,6 +284,38 @@ final class MPVPlayer: ObservableObject {
         }
     }
 
+    /// A reading of how playback is going, to tell a slow stream from a player that can't keep up.
+    struct Health: Equatable {
+        var video = ""
+        var decoder = ""
+        /// Frames thrown away because they were decoded or shown too late.
+        var droppedFrames = 0
+        /// Seconds of stream downloaded ahead of what is on screen.
+        var bufferedSeconds = 0.0
+        /// Bytes per second arriving, and what the stream needs.
+        var arriving = 0.0
+        var needed = 0.0
+        /// Times playback has stopped to wait for data since this stream started.
+        var stalls = 0
+    }
+
+    /// Safe to call from any thread.
+    func health() -> Health {
+        func number(_ name: String) -> Double { propertyString(name).flatMap(Double.init) ?? 0 }
+        var health = Health()
+        let codec = propertyString("video-format") ?? "?"
+        let fps = number("estimated-vf-fps")
+        health.video = "\(codec.uppercased()) \(Int(number("width")))×\(Int(number("height")))" + (fps > 0 ? String(format: " at %.0f fps", fps) : "")
+        let hwdec = propertyString("hwdec-current") ?? "no"
+        health.decoder = hwdec == "no" || hwdec.isEmpty ? "software" : "hardware (\(hwdec))"
+        health.droppedFrames = Int(number("frame-drop-count") + number("decoder-frame-drop-count"))
+        health.bufferedSeconds = number("demuxer-cache-duration")
+        health.arriving = number("cache-speed")
+        health.needed = (number("video-bitrate") + number("audio-bitrate")) / 8
+        health.stalls = stalls
+        return health
+    }
+
     private func propertyString(_ name: String) -> String? {
         guard let value = mpv_get_property_string(mpv, name) else { return nil }
         defer { mpv_free(value) }
@@ -352,7 +386,10 @@ final class MPVPlayer: ObservableObject {
             else { return }
             DispatchQueue.main.async {
                 if name == "pause" { self.isPaused = flag != 0 }
-                if name == "paused-for-cache" { self.isBuffering = flag != 0 }
+                if name == "paused-for-cache" {
+                    if flag != 0, self.hasStarted { self.stalls += 1 }
+                    self.isBuffering = flag != 0
+                }
                 // With keep-open, a live stream that runs dry stops here instead of ending the file.
                 if name == "eof-reached", flag != 0, self.isLive {
                     self.playbackEnded(message: "This channel stopped sending video.")

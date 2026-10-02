@@ -30,6 +30,8 @@ struct PlayerScreen: View {
     @FocusState private var panelFocus: Int?
     @AppStorage(PlayerScreen.panelOpacityKey) private var panelOpacity = PlayerScreen.defaultPanelOpacity
     @State private var watchTask: Task<Void, Never>?
+    /// Playback details in the corner, for telling a slow stream from a slow player.
+    @State private var showsHealth = false
 
     /// How solid the channel panel is, in percent; lower lets more of the picture through.
     static let panelOpacityKey = "panelOpacity"
@@ -57,6 +59,10 @@ struct PlayerScreen: View {
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
             } else if player.isBuffering {
                 ProgressView()
+            }
+
+            if showsHealth {
+                HealthOverlay()
             }
 
             if showsPanel {
@@ -117,6 +123,12 @@ struct PlayerScreen: View {
                         } label: {
                             Label("Audio and subtitles", systemImage: "captions.bubble")
                         }
+                    }
+                    Button {
+                        showsHealth.toggle()
+                        withAnimation { showsPanel = false }
+                    } label: {
+                        Label(showsHealth ? "Hide playback details" : "Show playback details", systemImage: "waveform.path.ecg")
                     }
                     ForEach(Array(session.channels.enumerated()), id: \.element.id) { position, entry in
                         Button {
@@ -282,6 +294,64 @@ struct PlayerScreen: View {
         watchTask?.cancel()
         savePosition(isFinal: true)
         player.stop()
+    }
+}
+
+/// Live figures on the stream and the decoder, with a plain reading of what they mean.
+private struct HealthOverlay: View {
+    @EnvironmentObject private var player: MPVPlayer
+    @State private var health = MPVPlayer.Health()
+    /// Dropped-frame counts from the last half minute, oldest first.
+    @State private var drops: [Int] = []
+
+    private var recentDrops: Int { (drops.last ?? 0) - (drops.first ?? 0) }
+
+    private var verdict: String {
+        if health.video.hasPrefix("?") { return "Waiting for the stream." }
+        if health.bufferedSeconds < 1 || (health.needed > 0 && health.arriving < health.needed * 0.9 && health.bufferedSeconds < 3) {
+            return "The stream is arriving too slowly: the network or the provider."
+        }
+        if recentDrops > 15 {
+            return "Data arrives in time but frames are dropped: the player isn't keeping up."
+        }
+        return health.stalls > 0 ? "Fine now. Earlier stalls were waits for data." : "Playing normally."
+    }
+
+    var body: some View {
+        VStack {
+            HStack {
+                Spacer()
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(health.video)
+                    Text("Decoding: \(health.decoder)")
+                    Text("Dropped frames: \(health.droppedFrames) (\(recentDrops) in the last 30 s)")
+                    Text("Buffered ahead: \(health.bufferedSeconds, specifier: "%.1f") s")
+                    Text("Arriving: \(Self.rate(health.arriving))  ·  needed: \(Self.rate(health.needed))")
+                    Text("Stalls: \(health.stalls)")
+                    Text(verdict)
+                        .foregroundStyle(.yellow)
+                        .frame(maxWidth: 560, alignment: .leading)
+                }
+                .font(.caption.monospacedDigit())
+                .padding(24)
+                .background(Color.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 16))
+            }
+            Spacer()
+        }
+        .padding(60)
+        .task {
+            while !Task.isCancelled {
+                let player = player
+                let reading = await Task.detached { player.health() }.value
+                health = reading
+                drops = Array((drops + [reading.droppedFrames]).suffix(30))
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+    }
+
+    private static func rate(_ bytesPerSecond: Double) -> String {
+        String(format: "%.1f Mbit/s", bytesPerSecond * 8 / 1_000_000)
     }
 }
 
