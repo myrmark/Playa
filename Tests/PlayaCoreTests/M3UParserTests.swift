@@ -45,10 +45,12 @@ final class M3UParserTests: XCTestCase {
         http://host:80/series/user/pass/303.mp4
         #EXTINF:-1 group-title="Clips",Loose file
         http://other.example/video/clip.MP4
+        #EXTINF:-1 group-title="Clips",File with a token
+        http://other.example/video/film.mov?token=abc
         """
         let playlist = M3UParser.parse(text)
-        XCTAssertEqual(playlist.channels.map(\.kind), [.live, .movie, .series, .movie])
-        XCTAssertEqual(playlist.countByKind, [.live: 1, .movie: 2, .series: 1])
+        XCTAssertEqual(playlist.channels.map(\.kind), [.live, .movie, .series, .movie, .movie])
+        XCTAssertEqual(playlist.countByKind, [.live: 1, .movie: 3, .series: 1])
         XCTAssertEqual(playlist.groupsByKind[.live], ["Sweden"])
         XCTAssertEqual(playlist.groupsByKind[.movie], ["Nordic", "Clips"])
         XCTAssertEqual(playlist.groupsByKind[.series], ["Nordic"])

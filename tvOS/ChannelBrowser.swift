@@ -404,6 +404,8 @@ struct ChannelPane: View {
                     showsGuide.toggle()
                 } label: {
                     Label(showsGuide ? "Show as List" : "Show Guide", systemImage: showsGuide ? "list.bullet" : "calendar")
+                        .lineLimit(1)
+                        .fixedSize()
                 }
             }
             Button {

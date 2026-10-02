@@ -8,12 +8,17 @@ public enum ChannelKind: String, CaseIterable, Hashable, Sendable {
 
     private static let fileExtensions = [".mkv", ".mp4", ".avi", ".m4v", ".mpg", ".mov"]
 
+    /// The address without any `?query`, so a file extension is still recognised.
+    private static func path(of streamURL: String) -> Substring {
+        streamURL.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false).first ?? ""
+    }
+
     /// Providers don't label entries, but on-demand streams are files under `/movie/`
     /// or `/series/` (the Xtream layout), while live channels have no file extension.
     public init(streamURL: String) {
         if streamURL.contains("/series/") {
             self = .series
-        } else if streamURL.contains("/movie/") || Self.fileExtensions.contains(where: streamURL.lowercased().hasSuffix) {
+        } else if streamURL.contains("/movie/") || Self.fileExtensions.contains(where: Self.path(of: streamURL).lowercased().hasSuffix) {
             self = .movie
         } else {
             self = .live
