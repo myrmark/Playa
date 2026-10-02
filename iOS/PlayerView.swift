@@ -1,3 +1,5 @@
+import AVFoundation
+import MediaPlayer
 import PlayaCore
 import SwiftUI
 import UIKit
@@ -28,6 +30,12 @@ struct PlayerView: View {
     @State private var watchTask: Task<Void, Never>?
     /// Slider value while the seek bar is being dragged.
     @State private var scrubPosition: Double?
+    /// What a vertical swipe along a screen edge is adjusting, and the level it started from.
+    @State private var edgeSwipe: (kind: EdgeAdjustment, start: Double)?
+    @State private var edgeLevel: (kind: EdgeAdjustment, value: Double)?
+    @State private var edgeToken = 0
+    @State private var originalBrightness: CGFloat?
+    @StateObject private var volume = SystemVolume()
 
     private var channel: Channel { session.channels[index] }
     private var isLive: Bool { channel.kind == .live }
@@ -37,13 +45,22 @@ struct PlayerView: View {
             Color.black.ignoresSafeArea()
             VideoSurface(layer: player.videoLayer)
                 .ignoresSafeArea()
-            // The video view doesn't take touches itself; this layer toggles the controls.
-            Color.clear
-                .contentShape(Rectangle())
-                .ignoresSafeArea()
-                .onTapGesture {
-                    if showsControls { withAnimation { showsControls = false } } else { revealControls() }
-                }
+            // The video view doesn't take touches itself; this layer toggles the controls, and
+            // swipes up and down along the right edge set the volume, along the left the brightness.
+            GeometryReader { geometry in
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        if showsControls { withAnimation { showsControls = false } } else { revealControls() }
+                    }
+                    .gesture(edgeGesture(in: geometry.size))
+            }
+            .ignoresSafeArea()
+            // Present in the view tree, the volume view keeps the system's own volume display away.
+            VolumeHost(view: volume.view)
+                .frame(width: 1, height: 1)
+                .opacity(0.01)
+                .allowsHitTesting(false)
 
             if let error = player.errorMessage {
                 VStack(spacing: 12) {
@@ -70,6 +87,12 @@ struct PlayerView: View {
             if showsControls || player.isPaused {
                 controls
                     .transition(.opacity)
+            }
+
+            if let edgeLevel {
+                EdgeLevelView(kind: edgeLevel.kind, value: edgeLevel.value)
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
             }
         }
         .preferredColorScheme(.dark)
@@ -290,11 +313,98 @@ struct PlayerView: View {
         resume.record(channel, position: player.position, duration: player.duration, isFinal: isFinal)
     }
 
+    /// A vertical drag that starts in the outer third of the screen. Sideways drags and the
+    /// middle are left alone, so they don't fight with taps and the seek bar.
+    private func edgeGesture(in size: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onChanged { drag in
+                if edgeSwipe == nil {
+                    guard abs(drag.translation.height) > abs(drag.translation.width) else { return }
+                    let x = drag.startLocation.x
+                    if x > size.width * 2 / 3 {
+                        edgeSwipe = (.volume, volume.level)
+                    } else if x < size.width / 3 {
+                        if originalBrightness == nil { originalBrightness = UIScreen.main.brightness }
+                        edgeSwipe = (.brightness, Double(UIScreen.main.brightness))
+                    } else {
+                        return
+                    }
+                }
+                guard let swipe = edgeSwipe else { return }
+                // Three quarters of the screen's height covers the whole range.
+                let value = min(max(swipe.start - drag.translation.height / (size.height * 0.75), 0), 1)
+                switch swipe.kind {
+                case .volume: volume.level = value
+                case .brightness: UIScreen.main.brightness = value
+                }
+                edgeToken += 1
+                withAnimation(.easeOut(duration: 0.1)) { edgeLevel = (swipe.kind, value) }
+            }
+            .onEnded { _ in
+                edgeSwipe = nil
+                let token = edgeToken
+                Task {
+                    try? await Task.sleep(for: .seconds(1))
+                    if token == edgeToken { withAnimation { edgeLevel = nil } }
+                }
+            }
+    }
+
     private func close() {
+        // Brightness set for watching is for watching only.
+        if let originalBrightness { UIScreen.main.brightness = originalBrightness }
         watchTask?.cancel()
         savePosition(isFinal: true)
         player.stop()
     }
+}
+
+enum EdgeAdjustment {
+    case volume, brightness
+}
+
+/// The level being set by an edge swipe, in the middle of the screen.
+private struct EdgeLevelView: View {
+    let kind: EdgeAdjustment
+    let value: Double
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: kind == .volume
+                  ? (value == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                  : "sun.max.fill")
+                .frame(width: 26)
+            ProgressView(value: value)
+                .tint(.white)
+                .frame(width: 140)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial, in: Capsule())
+    }
+}
+
+/// The device's own volume. Apps have no direct way to set it; the slider inside the system
+/// volume view is the accepted route.
+@MainActor
+final class SystemVolume: ObservableObject {
+    let view = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 100, height: 40))
+
+    var level: Double {
+        get { Double(AVAudioSession.sharedInstance().outputVolume) }
+        set {
+            guard let slider = view.subviews.compactMap({ $0 as? UISlider }).first else { return }
+            slider.setValue(Float(newValue), animated: false)
+            slider.sendActions(for: .valueChanged)
+        }
+    }
+}
+
+private struct VolumeHost: UIViewRepresentable {
+    let view: MPVolumeView
+    func makeUIView(context: Context) -> MPVolumeView { view }
+    func updateUIView(_ view: MPVolumeView, context: Context) {}
 }
 
 /// Hosts the layer mpv renders into.
