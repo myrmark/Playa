@@ -7,6 +7,7 @@ struct GuideView: View {
     let playlist: Playlist
     let guide: Guide
     let favourites: Set<String>
+    let lists: [ChannelList]
     let now: Date
     let playingChannel: Channel?
     let onPlay: (Channel) -> Void
@@ -23,12 +24,13 @@ struct GuideView: View {
     private static let step: TimeInterval = 2 * 3600
 
     init(
-        playlist: Playlist, guide: Guide, favourites: Set<String>, now: Date, initialFilter: ChannelFilter,
+        playlist: Playlist, guide: Guide, favourites: Set<String>, lists: [ChannelList], now: Date, initialFilter: ChannelFilter,
         playingChannel: Channel?, onPlay: @escaping (Channel) -> Void, onClose: @escaping () -> Void
     ) {
         self.playlist = playlist
         self.guide = guide
         self.favourites = favourites
+        self.lists = lists
         self.now = now
         self.playingChannel = playingChannel
         self.onPlay = onPlay
@@ -79,17 +81,26 @@ struct GuideView: View {
     }
 
     private func updateRows() {
+        var list: ChannelList?
+        if case .list(let id) = filter { list = lists.first { $0.id == id } }
+        let members = Set(list?.keys ?? [])
         rows = playlist.channels.filter { channel in
             guard channel.kind == .live else { return false }
             switch filter {
             case .all: break
             case .favourites: guard favourites.contains(channel.key) else { return false }
+            case .list: guard members.contains(channel.key) else { return false }
             case .group(let group): guard channel.group == group else { return false }
             }
             if onlyWithProgrammes {
                 guard let id = channel.tvgID, guide.programmes[id.lowercased()] != nil else { return false }
             }
             return true
+        }
+        if let list {
+            // A list keeps the order its owner gave it.
+            let position = Dictionary(list.keys.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+            rows.sort { (position[$0.key] ?? 0) < (position[$1.key] ?? 0) }
         }
         rowGeneration += 1
     }
@@ -101,6 +112,9 @@ struct GuideView: View {
             Picker("Channels", selection: $filter) {
                 Text("All channels").tag(ChannelFilter.all)
                 Label("Favourites", systemImage: "star.fill").tag(ChannelFilter.favourites)
+                ForEach(lists) { list in
+                    Label(list.name, systemImage: "list.bullet").tag(ChannelFilter.list(list.id))
+                }
                 Divider()
                 ForEach(playlist.groupsByKind[.live] ?? [], id: \.self) { group in
                     Text(group).tag(ChannelFilter.group(group))

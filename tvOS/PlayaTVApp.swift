@@ -8,6 +8,7 @@ struct PlayaTVApp: App {
     @StateObject private var epg = EPGStore()
     @StateObject private var resume = ResumeStore()
     @StateObject private var player = MPVPlayer()
+    @StateObject private var listEditor = ListEditor()
 
     init() {
         try? AVAudioSession.sharedInstance().setCategory(.playback)
@@ -20,6 +21,7 @@ struct PlayaTVApp: App {
                 .environmentObject(epg)
                 .environmentObject(resume)
                 .environmentObject(player)
+                .environmentObject(listEditor)
         }
     }
 }
@@ -27,6 +29,7 @@ struct PlayaTVApp: App {
 struct RootView: View {
     @EnvironmentObject private var store: PlaylistStore
     @EnvironmentObject private var epg: EPGStore
+    @EnvironmentObject private var listEditor: ListEditor
     @State private var tab = ChannelKind.live.rawValue
 
     var body: some View {
@@ -48,9 +51,6 @@ struct RootView: View {
                         .tabItem { Text(kind.title) }
                         .tag(kind.rawValue)
                     }
-                    GuideScreen()
-                        .tabItem { Text("Guide") }
-                        .tag("guide")
                     SearchView()
                         .tabItem { Label("Search", systemImage: "magnifyingglass") }
                         .tag("search")
@@ -71,6 +71,9 @@ struct RootView: View {
             }
         }
         .onReceive(store.$playlist) { epg.load(for: store.active, playlist: $0) }
+        .sheet(item: $listEditor.request) { request in
+            ListNameSheet(request: request)
+        }
     }
 }
 

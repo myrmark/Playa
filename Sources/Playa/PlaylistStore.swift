@@ -22,11 +22,18 @@ final class PlaylistStore: ObservableObject {
     @Published var errorMessage: String?
     /// `Channel.key`s of starred channels and `SeriesShow.favouriteKey`s of starred shows.
     @Published private(set) var favourites: Set<String> = []
+    /// Collections the user put together, in the order they were created.
+    @Published private(set) var lists: [ChannelList] = []
 
     /// What is synced between devices. Stamps decide whose copy is newer.
     private struct SyncedFavourites: Codable {
         var updatedAt: Date
         var keys: [String]
+    }
+
+    private struct SyncedLists: Codable {
+        var updatedAt: Date
+        var lists: [ChannelList]
     }
 
     private struct SyncedPlaylists: Codable {
@@ -45,6 +52,7 @@ final class PlaylistStore: ObservableObject {
     /// Cached playlists older than this are refreshed in the background.
     private static let maxCacheAge: TimeInterval = 24 * 3600
     private static let favouritesKey = "favourites"
+    private static let listsKey = "lists"
     private static let savedKey = "playlists"
     private static let activeKey = "activePlaylistID"
 
@@ -80,6 +88,81 @@ final class PlaylistStore: ObservableObject {
         set { defaults.set(newValue.timeIntervalSince1970, forKey: "favouritesStamp") }
     }
 
+    private var listsStamp: Date {
+        get { Date(timeIntervalSince1970: defaults.double(forKey: "listsStamp")) }
+        set { defaults.set(newValue.timeIntervalSince1970, forKey: "listsStamp") }
+    }
+
+    // MARK: Lists
+
+    @discardableResult
+    func createList(named name: String, adding key: String? = nil) -> UUID {
+        var list = ChannelList(name: name.trimmingCharacters(in: .whitespacesAndNewlines))
+        if let key { list.add(key) }
+        lists.append(list)
+        listsChanged()
+        return list.id
+    }
+
+    func renameList(_ id: UUID, to name: String) {
+        updateList(id) { $0.name = name.trimmingCharacters(in: .whitespacesAndNewlines) }
+    }
+
+    func deleteList(_ id: UUID) {
+        lists.removeAll { $0.id == id }
+        listsChanged()
+    }
+
+    /// Adds `key` to the list, or removes it if it is already there.
+    func toggle(_ key: String, inList id: UUID) {
+        updateList(id) { $0.contains(key) ? $0.remove(key) : $0.add(key) }
+    }
+
+    /// Moves `key` to sit directly before `other` in the list, or to the end when `other` is nil.
+    func move(_ key: String, before other: String?, inList id: UUID) {
+        updateList(id) { $0.move(key, before: other) }
+    }
+
+    private func updateList(_ id: UUID, _ change: (inout ChannelList) -> Void) {
+        guard let index = lists.firstIndex(where: { $0.id == id }) else { return }
+        change(&lists[index])
+        listsChanged()
+    }
+
+    private func listsChanged() {
+        persistLists()
+        listsStamp = Date()
+        CloudSync.write(SyncedLists(updatedAt: listsStamp, lists: lists), key: Self.listsKey)
+    }
+
+    private func persistLists() {
+        if let data = try? JSONEncoder().encode(lists), let sealed = Vault.seal(data) {
+            defaults.set(sealed, forKey: Self.listsKey)
+        }
+    }
+
+    private func pullLists() {
+        guard let remote = CloudSync.read(SyncedLists.self, key: Self.listsKey) else {
+            if !lists.isEmpty { listsChanged() }
+            return
+        }
+        if listsStamp.timeIntervalSince1970 == 0 {
+            // First contact: keep the lists both sides have.
+            let known = Set(lists.map(\.id))
+            lists += remote.lists.filter { !known.contains($0.id) }
+            if lists == remote.lists {
+                persistLists()
+                listsStamp = remote.updatedAt
+            } else {
+                listsChanged()
+            }
+        } else if remote.updatedAt > listsStamp {
+            lists = remote.lists
+            persistLists()
+            listsStamp = remote.updatedAt
+        }
+    }
+
     private var playlistsStamp: Date {
         get { Date(timeIntervalSince1970: defaults.double(forKey: "playlistsStamp")) }
         set { defaults.set(newValue.timeIntervalSince1970, forKey: "playlistsStamp") }
@@ -113,6 +196,7 @@ final class PlaylistStore: ObservableObject {
         encryption key available: \(Vault.isAvailable)
         playlists on this device: \(saved.count)
         favourites: \(favourites.count)
+        lists: \(lists.count)
         playlists in iCloud: \(remote.map { "\($0.playlists.count), last changed \($0.updatedAt.formatted(date: .abbreviated, time: .standard))" } ?? "none readable")
         last started, per iCloud key-value storage: \(CloudSync.lastSeen)
         """
@@ -175,6 +259,10 @@ final class PlaylistStore: ObservableObject {
             favourites = Set(plain)
             persistFavourites()
         }
+        if let sealed = defaults.data(forKey: Self.listsKey), let data = Vault.open(sealed),
+           let decoded = try? JSONDecoder().decode([ChannelList].self, from: data) {
+            lists = decoded
+        }
         // Older versions also stored channel favourites as stream addresses.
         if favourites.contains(where: { $0.contains("://") }) {
             favourites = Set(favourites.map { $0.contains("://") ? Channel.key(forStreamURL: $0) : $0 })
@@ -207,9 +295,11 @@ final class PlaylistStore: ObservableObject {
         CloudSync.start()
         CloudSync.removeLegacyKeychainItem()
         pullFavourites()
+        pullLists()
         subscription = CloudSync.changes.receive(on: DispatchQueue.main).sink { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.pullFavourites()
+                self?.pullLists()
                 Task { await self?.pullPlaylists() }
             }
         }

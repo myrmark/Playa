@@ -13,6 +13,13 @@ struct SeriesSidebar: View {
     @Binding var selection: Channel?
     let toggleFavouriteKey: (String) -> Void
     let toggleFavourite: (Channel) -> Void
+    let lists: [ChannelList]
+    /// Adds a show to a list, or removes it if it is already there.
+    let toggleShowInList: (String, UUID) -> Void
+    /// Asks for a name and creates a list holding the given key.
+    let newList: (String) -> Void
+    /// The right-click menu for an episode.
+    let episodeMenu: (Channel) -> [RowMenuItem]
 
     @State private var seasonNumber = 0
 
@@ -73,6 +80,16 @@ struct SeriesSidebar: View {
             .contextMenu {
                 Button(favourites.contains(show.favouriteKey) ? "Remove from Favourites" : "Add to Favourites") {
                     toggleFavouriteKey(show.favouriteKey)
+                }
+                Menu("Add to List") {
+                    ForEach(lists) { list in
+                        Toggle(list.name, isOn: Binding(
+                            get: { list.contains(show.favouriteKey) },
+                            set: { _ in toggleShowInList(show.favouriteKey, list.id) }
+                        ))
+                    }
+                    if !lists.isEmpty { Divider() }
+                    Button("New List…") { newList(show.favouriteKey) }
                 }
             }
         }
@@ -138,7 +155,8 @@ struct SeriesSidebar: View {
                 selection: $selection,
                 toggleFavourite: toggleFavourite,
                 subtitle: { resume.label(for: $0) },
-                title: { labels[$0.id] ?? $0.name }
+                title: { labels[$0.id] ?? $0.name },
+                menu: episodeMenu
             )
             .padding(.top, 6)
         }

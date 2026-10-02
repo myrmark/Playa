@@ -6,7 +6,22 @@ import UniformTypeIdentifiers
 enum ChannelFilter: Hashable {
     case all
     case favourites
+    case list(UUID)
     case group(String)
+}
+
+/// What the list-name prompt is for.
+private enum ListPrompt: Identifiable {
+    /// A new list, optionally holding a first channel or show.
+    case new(adding: String?)
+    case rename(UUID)
+
+    var id: String {
+        switch self {
+        case .new: "new"
+        case .rename(let id): id.uuidString
+        }
+    }
 }
 
 struct ContentView: View {
@@ -34,6 +49,15 @@ struct ContentView: View {
     @State private var showingPlaylistSheet = false
     @State private var showingGuide = false
     @State private var playlistToRemove: SavedPlaylist?
+    @State private var listPrompt: ListPrompt?
+    @State private var listName = ""
+    @State private var listToDelete: ChannelList?
+
+    /// The list the sidebar is showing, if it is showing one.
+    private var currentList: ChannelList? {
+        guard case .list(let id) = filter else { return nil }
+        return store.lists.first { $0.id == id }
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -62,6 +86,7 @@ struct ContentView: View {
                     playlist: store.playlist,
                     guide: epg.guide,
                     favourites: store.favourites,
+                    lists: store.lists,
                     now: now,
                     initialFilter: guideStartFilter,
                     playingChannel: selectedChannel,
@@ -103,6 +128,35 @@ struct ContentView: View {
         .sheet(isPresented: $showingPlaylistSheet) {
             PlaylistSheet(store: store)
         }
+        .alert(
+            { if case .rename = listPrompt { "Rename List" } else { "New List" } }(),
+            isPresented: Binding(get: { listPrompt != nil }, set: { if !$0 { listPrompt = nil } }),
+            presenting: listPrompt
+        ) { prompt in
+            TextField("Name", text: $listName)
+            Button("Cancel", role: .cancel) {}
+            Button({ if case .rename = prompt { "Rename" } else { "Create" } }()) {
+                switch prompt {
+                case .new(let key):
+                    let id = store.createList(named: listName, adding: key)
+                    // A list made from the menu button, rather than from a channel, is opened.
+                    if key == nil { filter = .list(id) }
+                case .rename(let id):
+                    store.renameList(id, to: listName)
+                }
+            }
+            .disabled(listName.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+        .confirmationDialog(
+            "Delete the list “\(listToDelete?.name ?? "")”?",
+            isPresented: Binding(get: { listToDelete != nil }, set: { if !$0 { listToDelete = nil } })
+        ) {
+            Button("Delete", role: .destructive) {
+                if let id = listToDelete?.id { store.deleteList(id) }
+            }
+        } message: {
+            Text("The channels in it are not affected. The list is removed from your other devices too.")
+        }
         .task {
             await store.loadOnLaunch()
             if store.saved.isEmpty {
@@ -133,6 +187,14 @@ struct ContentView: View {
         .onReceive(store.$favourites) { favourites in
             if filter == .favourites {
                 updateVisibleChannels(in: store.playlist, favourites: favourites)
+            }
+        }
+        .onReceive(store.$lists) { lists in
+            guard case .list(let id) = filter else { return }
+            if lists.contains(where: { $0.id == id }) {
+                updateVisibleChannels(in: store.playlist, favourites: store.favourites, lists: lists)
+            } else {
+                filter = .all
             }
         }
         .onChange(of: section) {
@@ -173,9 +235,13 @@ struct ContentView: View {
 
     /// Filters on a background thread: matching text against a provider-sized playlist
     /// takes long enough to make typing in the search field stutter.
-    private func updateVisibleChannels(in playlist: Playlist, favourites: Set<String>, afterTyping: Bool = false) {
+    private func updateVisibleChannels(
+        in playlist: Playlist, favourites: Set<String>, lists: [ChannelList]? = nil, afterTyping: Bool = false
+    ) {
         filterTask?.cancel()
         let section = section, filter = filter, searchText = searchText
+        var list: ChannelList?
+        if case .list(let id) = filter { list = (lists ?? store.lists).first { $0.id == id } }
         filterTask = Task {
             if afterTyping {
                 // Wait for a pause in typing instead of filtering on every keystroke.
@@ -183,7 +249,7 @@ struct ContentView: View {
                 if Task.isCancelled { return }
             }
             let result = await Task.detached(priority: .userInitiated) {
-                Self.visibleItems(in: playlist, section: section, filter: filter, searchText: searchText, favourites: favourites)
+                Self.visibleItems(in: playlist, section: section, filter: filter, searchText: searchText, favourites: favourites, list: list)
             }.value
             if Task.isCancelled { return }
             listGeneration += 1
@@ -193,20 +259,28 @@ struct ContentView: View {
     }
 
     private nonisolated static func visibleItems(
-        in playlist: Playlist, section: ChannelKind, filter: ChannelFilter, searchText: String, favourites: Set<String>
+        in playlist: Playlist, section: ChannelKind, filter: ChannelFilter, searchText: String, favourites: Set<String>,
+        list: ChannelList?
     ) -> (channels: [Channel], shows: [SeriesShow]) {
         func matchesSearch(_ name: String) -> Bool {
             searchText.isEmpty || name.range(of: searchText, options: [.caseInsensitive, .diacriticInsensitive]) != nil
         }
+        let members = Set(list?.keys ?? [])
+        // A list keeps the order its owner gave it, not the playlist's.
+        let position = Dictionary((list?.keys ?? []).enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
         if section == .series {
             // Series are browsed by show; the episode list comes from the open show.
             let shows = playlist.shows.filter { show in
                 switch filter {
                 case .all: break
                 case .favourites: guard favourites.contains(show.favouriteKey) else { return false }
+                case .list: guard members.contains(show.favouriteKey) else { return false }
                 case .group(let group): guard show.group == group else { return false }
                 }
                 return matchesSearch(show.name)
+            }
+            if list != nil {
+                return ([], shows.sorted { (position[$0.favouriteKey] ?? 0) < (position[$1.favouriteKey] ?? 0) })
             }
             return ([], shows)
         }
@@ -218,11 +292,79 @@ struct ContentView: View {
             switch filter {
             case .all: break
             case .favourites: guard favourites.contains(channel.key) else { return false }
+            case .list: guard members.contains(channel.key) else { return false }
             case .group(let group): guard channel.group == group else { return false }
             }
             return matchesSearch(channel.name)
         }
+        if list != nil {
+            return (channels.sorted { (position[$0.key] ?? 0) < (position[$1.key] ?? 0) }, [])
+        }
         return (channels, [])
+    }
+
+    /// The "Add to List" submenu for a channel, film, episode or show.
+    private func listMenuItems(for key: String) -> [RowMenuItem] {
+        var items = store.lists.map { list in
+            RowMenuItem(title: list.name, isOn: list.contains(key), action: { store.toggle(key, inList: list.id) })
+        }
+        if !items.isEmpty { items.append(.separator) }
+        items.append(RowMenuItem(title: "New List…", action: { promptForNewList(adding: key) }))
+        return items
+    }
+
+    private func promptForNewList(adding key: String?) {
+        listName = ""
+        listPrompt = .new(adding: key)
+    }
+
+    private func rowMenu(for channel: Channel) -> [RowMenuItem] {
+        var items = [
+            RowMenuItem(
+                title: store.favourites.contains(channel.key) ? "Remove from Favourites" : "Add to Favourites",
+                action: { store.toggleFavourite(channel) }
+            ),
+            RowMenuItem(title: "Add to List", children: listMenuItems(for: channel.key)),
+        ]
+        // Rearranging only makes sense while the whole list is showing.
+        guard let list = currentList, searchText.isEmpty, section != .series,
+              let index = visibleChannels.firstIndex(of: channel)
+        else { return items }
+        func move(before other: Channel?) {
+            store.move(channel.key, before: other?.key, inList: list.id)
+        }
+        items.append(.separator)
+        if index > 0 {
+            items.append(RowMenuItem(title: "Move to Top", action: { move(before: visibleChannels.first) }))
+            items.append(RowMenuItem(title: "Move Up", action: { move(before: visibleChannels[index - 1]) }))
+        }
+        if index < visibleChannels.count - 1 {
+            let after = index + 2 < visibleChannels.count ? visibleChannels[index + 2] : nil
+            items.append(RowMenuItem(title: "Move Down", action: { move(before: after) }))
+        }
+        items.append(RowMenuItem(title: "Remove from “\(list.name)”", action: { store.toggle(channel.key, inList: list.id) }))
+        return items
+    }
+
+    /// New, rename and delete for lists, next to the group picker.
+    private var listMenu: some View {
+        Menu {
+            Button("New List…") { promptForNewList(adding: nil) }
+            if let list = currentList {
+                Divider()
+                Button("Rename “\(list.name)”…") {
+                    listName = list.name
+                    listPrompt = .rename(list.id)
+                }
+                Button("Delete “\(list.name)”…", role: .destructive) { listToDelete = list }
+            }
+        } label: {
+            Image(systemName: "list.bullet")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Lists")
     }
 
     private var playlistMenu: some View {
@@ -329,15 +471,21 @@ struct ContentView: View {
                 .padding(.top, 8)
             }
 
-            Picker("Group", selection: $filter) {
-                Text("\(section.allTitle) (\(section == .series ? store.playlist.shows.count : store.playlist.countByKind[section] ?? 0))").tag(ChannelFilter.all)
-                Label("Favourites", systemImage: "star.fill").tag(ChannelFilter.favourites)
-                Divider()
-                ForEach(store.playlist.groupsByKind[section] ?? [], id: \.self) { group in
-                    Text(group).tag(ChannelFilter.group(group))
+            HStack(spacing: 8) {
+                Picker("Group", selection: $filter) {
+                    Text("\(section.allTitle) (\(section == .series ? store.playlist.shows.count : store.playlist.countByKind[section] ?? 0))").tag(ChannelFilter.all)
+                    Label("Favourites", systemImage: "star.fill").tag(ChannelFilter.favourites)
+                    ForEach(store.lists) { list in
+                        Label(list.name, systemImage: "list.bullet").tag(ChannelFilter.list(list.id))
+                    }
+                    Divider()
+                    ForEach(store.playlist.groupsByKind[section] ?? [], id: \.self) { group in
+                        Text(group).tag(ChannelFilter.group(group))
+                    }
                 }
+                .labelsHidden()
+                listMenu
             }
-            .labelsHidden()
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
 
@@ -354,7 +502,11 @@ struct ContentView: View {
                         openShow: $openShow,
                         selection: $selectedChannel,
                         toggleFavouriteKey: store.toggleFavourite(key:),
-                        toggleFavourite: store.toggleFavourite
+                        toggleFavourite: store.toggleFavourite,
+                        lists: store.lists,
+                        toggleShowInList: { key, id in store.toggle(key, inList: id) },
+                        newList: { key in promptForNewList(adding: key) },
+                        episodeMenu: rowMenu(for:)
                     )
                 } else {
                     ChannelTable(
@@ -368,6 +520,10 @@ struct ContentView: View {
                             channel.kind == .live
                                 ? guide.nowAndNext(channelID: channel.tvgID, at: now).now?.title
                                 : resume.label(for: channel)
+                        },
+                        menu: rowMenu(for:),
+                        onMove: currentList.flatMap { list in
+                            searchText.isEmpty ? { channel, before in store.move(channel.key, before: before?.key, inList: list.id) } : nil
                         }
                     )
                 }
@@ -382,6 +538,10 @@ struct ContentView: View {
                     ContentUnavailableView("No favourites yet", systemImage: "star", description: Text(section == .series
                         ? "Right-click a show to add it."
                         : "Right-click a channel, or press ⌘D while watching, to add it."))
+                } else if isListEmpty, let list = currentList, searchText.isEmpty {
+                    ContentUnavailableView("“\(list.name)” is empty here", systemImage: "list.bullet", description: Text(section == .series
+                        ? "Right-click a show and choose Add to List."
+                        : "Right-click a channel and choose Add to List."))
                 } else if isListEmpty {
                     ContentUnavailableView.search(text: searchText)
                 }

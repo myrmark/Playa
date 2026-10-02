@@ -2,6 +2,17 @@ import AppKit
 import PlayaCore
 import SwiftUI
 
+/// An entry in a row's right-click menu.
+struct RowMenuItem {
+    var title = ""
+    var isOn = false
+    var children: [RowMenuItem] = []
+    var action: (() -> Void)?
+    var isSeparator = false
+
+    static let separator = RowMenuItem(isSeparator: true)
+}
+
 /// Channel list backed by NSTableView. SwiftUI's `List` keeps per-row state for
 /// every element, which makes swapping a provider-sized playlist (100k+ entries)
 /// freeze the app for many seconds; NSTableView only builds the visible rows.
@@ -18,6 +29,11 @@ struct ChannelTable: NSViewRepresentable {
     let subtitle: (Channel) -> String?
     /// First line of a row. Episodes show "E03 · Title" instead of the raw playlist name.
     var title: (Channel) -> String = { $0.name }
+    /// The right-click menu for a row.
+    var menu: (Channel) -> [RowMenuItem] = { _ in [] }
+    /// Set when rows can be dragged into a new order: called with the moved channel and the
+    /// channel it should now sit before, or nil for the end.
+    var onMove: ((Channel, Channel?) -> Void)?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(selection: $selection, toggleFavourite: toggleFavourite)
@@ -38,6 +54,8 @@ struct ChannelTable: NSViewRepresentable {
         let menu = NSMenu()
         menu.delegate = context.coordinator
         tableView.menu = menu
+        tableView.registerForDraggedTypes([Coordinator.rowType])
+        tableView.setDraggingSourceOperationMask(.move, forLocal: true)
 
         let scrollView = NSScrollView()
         scrollView.documentView = tableView
@@ -52,6 +70,8 @@ struct ChannelTable: NSViewRepresentable {
         coordinator.toggleFavourite = toggleFavourite
         coordinator.subtitle = subtitle
         coordinator.title = title
+        coordinator.menu = menu
+        coordinator.onMove = onMove
         let favouritesChanged = coordinator.favourites != favourites || coordinator.guideStamp != guideStamp
         coordinator.favourites = favourites
         coordinator.guideStamp = guideStamp
@@ -76,7 +96,10 @@ struct ChannelTable: NSViewRepresentable {
         var favourites: Set<String> = []
         var subtitle: (Channel) -> String? = { _ in nil }
         var title: (Channel) -> String = { $0.name }
+        var menu: (Channel) -> [RowMenuItem] = { _ in [] }
+        var onMove: ((Channel, Channel?) -> Void)?
         var guideStamp = 0
+        static let rowType = NSPasteboard.PasteboardType("com.filipmalmberg.Playa.channel-row")
         var channels: [Channel] = []
         var generation = -1
         weak var tableView: NSTableView?
@@ -90,19 +113,67 @@ struct ChannelTable: NSViewRepresentable {
         func menuNeedsUpdate(_ menu: NSMenu) {
             menu.removeAllItems()
             guard let row = tableView?.clickedRow, channels.indices.contains(row) else { return }
-            let isFavourite = favourites.contains(channels[row].key)
-            let item = NSMenuItem(
-                title: isFavourite ? "Remove from Favourites" : "Add to Favourites",
-                action: #selector(toggleFavouriteForClickedRow),
-                keyEquivalent: ""
-            )
-            item.target = self
-            menu.addItem(item)
+            fill(menu, with: self.menu(channels[row]))
         }
 
-        @objc private func toggleFavouriteForClickedRow() {
-            guard let row = tableView?.clickedRow, channels.indices.contains(row) else { return }
-            toggleFavourite(channels[row])
+        private func fill(_ menu: NSMenu, with items: [RowMenuItem]) {
+            for item in items {
+                if item.isSeparator {
+                    menu.addItem(.separator())
+                    continue
+                }
+                let menuItem = NSMenuItem(title: item.title, action: nil, keyEquivalent: "")
+                menuItem.state = item.isOn ? .on : .off
+                if !item.children.isEmpty {
+                    let submenu = NSMenu()
+                    fill(submenu, with: item.children)
+                    menuItem.submenu = submenu
+                } else if let action = item.action {
+                    menuItem.target = self
+                    menuItem.action = #selector(runMenuAction(_:))
+                    menuItem.representedObject = MenuAction(run: action)
+                }
+                menu.addItem(menuItem)
+            }
+        }
+
+        private final class MenuAction {
+            let run: () -> Void
+            init(run: @escaping () -> Void) { self.run = run }
+        }
+
+        @objc private func runMenuAction(_ sender: NSMenuItem) {
+            (sender.representedObject as? MenuAction)?.run()
+        }
+
+        // MARK: Reordering by drag
+
+        func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
+            guard onMove != nil else { return nil }
+            let item = NSPasteboardItem()
+            item.setString(String(row), forType: Self.rowType)
+            return item
+        }
+
+        func tableView(
+            _ tableView: NSTableView, validateDrop info: NSDraggingInfo, proposedRow row: Int,
+            proposedDropOperation dropOperation: NSTableView.DropOperation
+        ) -> NSDragOperation {
+            guard onMove != nil, info.draggingSource as? NSTableView === tableView else { return [] }
+            // Rows are dropped between other rows, never onto one.
+            tableView.setDropRow(row, dropOperation: .above)
+            return .move
+        }
+
+        func tableView(
+            _ tableView: NSTableView, acceptDrop info: NSDraggingInfo, row: Int,
+            dropOperation: NSTableView.DropOperation
+        ) -> Bool {
+            guard let onMove, let source = info.draggingPasteboard.string(forType: Self.rowType).flatMap(Int.init),
+                  channels.indices.contains(source), row != source, row != source + 1
+            else { return false }
+            onMove(channels[source], row < channels.count ? channels[row] : nil)
+            return true
         }
 
         var selectedChannel: Channel? {

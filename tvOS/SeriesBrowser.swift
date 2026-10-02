@@ -1,30 +1,12 @@
 import PlayaCore
 import SwiftUI
 
-/// Series: pick a group, then a show, then an episode.
+/// Series: Favourites, lists and groups on the left, shows on the right, then a show's episodes.
 struct SeriesBrowser: View {
-    @EnvironmentObject private var store: PlaylistStore
-
     var body: some View {
         NavigationStack {
-            let groups = store.playlist.groupsByKind[.series] ?? []
-            Group {
-                if groups.isEmpty {
-                    PlaylistLoadingView()
-                } else {
-                    List {
-                        NavigationLink(value: ChannelFilter.favourites) {
-                            Label("Favourites", systemImage: "star.fill")
-                        }
-                        ForEach(groups, id: \.self) { group in
-                            NavigationLink(group, value: ChannelFilter.group(group))
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Series")
-            .navigationDestination(for: ChannelFilter.self) { filter in
-                ShowList(filter: filter)
+            TwoPaneBrowser(kind: .series) { filter, focus, wantsFocus in
+                ShowPane(filter: filter, focus: focus, wantsFocus: wantsFocus)
             }
             .navigationDestination(for: SeriesShow.self) { show in
                 EpisodeList(show: show)
@@ -33,16 +15,24 @@ struct SeriesBrowser: View {
     }
 }
 
-struct ShowList: View {
+struct ShowPane: View {
     let filter: ChannelFilter
+    let focus: FocusState<BrowserFocus?>.Binding
+    @Binding var wantsFocus: Bool
     @EnvironmentObject private var store: PlaylistStore
 
     private var shows: [SeriesShow] {
-        store.playlist.shows.filter { show in
-            switch filter {
-            case .favourites: store.favourites.contains(show.favouriteKey)
-            case .group(let group): show.group == group
-            }
+        switch filter {
+        case .favourites:
+            return store.playlist.shows.filter { store.favourites.contains($0.favouriteKey) }
+        case .group(let group):
+            return store.playlist.shows.filter { $0.group == group }
+        case .list(let id):
+            guard let list = store.lists.first(where: { $0.id == id }) else { return [] }
+            // A list keeps the order its owner gave it.
+            let position = Dictionary(list.keys.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+            return store.playlist.shows.filter { position[$0.favouriteKey] != nil }
+                .sorted { (position[$0.favouriteKey] ?? 0) < (position[$1.favouriteKey] ?? 0) }
         }
     }
 
@@ -50,17 +40,34 @@ struct ShowList: View {
         let shows = shows
         Group {
             if shows.isEmpty {
-                Text(filter == .favourites ? "No favourite shows yet. Hold the select button on a show to add it." : "Nothing in this group.")
+                Text(emptyText)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                    .padding()
+                    .padding(60)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List(shows) { show in
                     ShowRow(show: show)
+                        .focused(focus, equals: .item(show.id))
                 }
             }
         }
-        .navigationTitle(filter.title)
+        .onAppear(perform: takeFocusIfAsked)
+        .onChange(of: wantsFocus) { takeFocusIfAsked() }
+    }
+
+    private func takeFocusIfAsked() {
+        guard wantsFocus else { return }
+        wantsFocus = false
+        if let first = shows.first { focus.wrappedValue = .item(first.id) }
+    }
+
+    private var emptyText: String {
+        switch filter {
+        case .favourites: "No favourite shows yet. Hold the select button on a show to add it."
+        case .list: "This list has no shows yet. Hold the select button on a show to add it."
+        case .group: "Nothing in this group."
+        }
     }
 }
 
@@ -97,9 +104,7 @@ struct ShowRow: View {
             }
         }
         .contextMenu {
-            Button(store.favourites.contains(show.favouriteKey) ? "Remove from Favourites" : "Add to Favourites") {
-                store.toggleFavourite(key: show.favouriteKey)
-            }
+            MembershipMenu(key: show.favouriteKey)
         }
     }
 }
