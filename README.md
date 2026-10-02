@@ -41,11 +41,12 @@ There is an early Apple TV version in `tvOS/`. It shares the playlist, guide, se
 
 ```sh
 brew install xcodegen
+echo "DEVELOPMENT_TEAM = YOURTEAMID" > Local.xcconfig
 xcodegen
 open PlayaTV.xcodeproj
 ```
 
-Choose your Apple TV or a tvOS simulator as the destination and run. In the player, up and down change channel, left and right skip in films and episodes, and Play/Pause pauses.
+Replace `YOURTEAMID` with your Apple developer team ID. Choose your Apple TV or a tvOS simulator as the destination and run. In the player, up and down change channel, left and right skip in films and episodes, and Play/Pause pauses.
 
 ## Using it
 

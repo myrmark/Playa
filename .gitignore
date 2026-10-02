@@ -7,3 +7,4 @@ xcuserdata/
 # Playlists contain provider credentials
 *.m3u
 *.m3u8
+Local.xcconfig
