@@ -68,6 +68,41 @@ final class FollowingTests: XCTestCase {
         XCTAssertEqual(missingList.count, 2, "a deleted list means no limit")
     }
 
+    func testQuotedTermsMatchWholeWordsOnly() {
+        let loose = SearchTerm("swe")
+        XCTAssertFalse(loose.wholeWord)
+        XCTAssertTrue(loose.matches("Sweet dreams"))
+        XCTAssertTrue(loose.matches("The answers"))
+
+        let whole = SearchTerm("\"SWE\"")
+        XCTAssertEqual(whole.text, "SWE")
+        XCTAssertTrue(whole.wholeWord)
+        XCTAssertTrue(whole.matches("Fotboll: SWE–NOR"))
+        XCTAssertTrue(whole.matches("swe"))
+        XCTAssertTrue(whole.matches("Final (SWE)"))
+        XCTAssertTrue(whole.matches("Sweet answers, then SWE v NOR"), "a later whole-word occurrence still counts")
+        XCTAssertFalse(whole.matches("Sweet dreams"))
+        XCTAssertFalse(whole.matches("The answers"))
+        XCTAssertFalse(whole.matches("SWE2"))
+
+        XCTAssertTrue(SearchTerm("“Nations League”").wholeWord, "typographic quotes work too")
+        XCTAssertTrue(SearchTerm("“Nations League”").matches("UEFA Nations League: final"))
+        XCTAssertFalse(SearchTerm("\"\"").matches("anything"))
+
+        let now = date("2026-10-02T18:00:00Z")
+        let guide = Guide(programmes: [
+            "a": [Programme(start: date("2026-10-02T19:00:00Z"), stop: date("2026-10-02T20:00:00Z"), title: "Sweet Home")],
+            "b": [Programme(start: date("2026-10-02T19:00:00Z"), stop: date("2026-10-02T20:00:00Z"), title: "Ishockey", description: "SWE–FIN")],
+        ])
+        var playlist = Playlist()
+        playlist.channels = [channel(0, "A", "a"), channel(1, "B", "b")]
+        let found = Following.broadcasts(
+            topics: [FollowedTopic(name: "Sverige", keywords: ["\"SWE\""])], guide: guide, playlist: playlist, from: now, horizon: 86_400
+        )
+        XCTAssertEqual(found.map(\.programme.title), ["Ishockey"])
+        XCTAssertEqual(guide.search("\"swe\"", from: now, horizon: 86_400).keys.sorted(), ["b"], "the guide search understands quotes too")
+    }
+
     func testLanguageMarkersMustStandAlone() {
         XCTAssertEqual(Following.languageRank(of: channel(0, "SVT1 HD SE", nil), tags: ["EN", "SE"]), 1)
         XCTAssertEqual(Following.languageRank(of: channel(0, "EN| Sky Sports", nil), tags: ["EN", "SE"]), 0)

@@ -352,8 +352,7 @@ private final class GuideRowView: NSView {
 
     private func isHighlighted(_ programme: Programme) -> Bool {
         guard !highlight.isEmpty else { return false }
-        return programme.title.range(of: highlight, options: [.caseInsensitive, .diacriticInsensitive]) != nil
-            || programme.description?.range(of: highlight, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+        return SearchTerm(highlight).matches(programme)
     }
 
     override var isFlipped: Bool { true }

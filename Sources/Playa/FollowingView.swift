@@ -247,12 +247,12 @@ private struct TopicEditor: View {
         VStack(alignment: .leading, spacing: 12) {
             Text(draft.existing == nil ? "Follow" : "Edit")
                 .font(.headline)
-            Text("Playa looks through the TV guide for programmes that mention the name or any of the other keywords, in their title or description.")
+            Text("Playa looks through the TV guide for programmes that mention the name or any of the other keywords, in their title or description. Put a keyword in quotes to match it only as a whole word: \"SWE\" finds SWE–NOR but not sweet or answers.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             TextField("Name, for example Sweden", text: $name)
                 .textFieldStyle(.roundedBorder)
-            TextField("Other keywords, separated by commas: Sverige, SWE", text: $keywords)
+            TextField("Other keywords, separated by commas: Sverige, \"SWE\"", text: $keywords)
                 .textFieldStyle(.roundedBorder)
             Picker("Look on", selection: $scope) {
                 Text("All channels").tag(FollowScope?.none)

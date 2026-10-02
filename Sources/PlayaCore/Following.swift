@@ -1,5 +1,45 @@
 import Foundation
 
+/// A word or phrase to look for in programme text. Written in quotes, it only matches as a
+/// whole word: "SWE" finds "SWE–NOR" but not "sweet" or "answers".
+public struct SearchTerm: Hashable, Sendable {
+    public let text: String
+    public let wholeWord: Bool
+
+    private static let quotes: Set<Character> = ["\"", "“", "”", "„", "«", "»"]
+
+    public init(_ raw: String) {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        if trimmed.count > 2, let first = trimmed.first, let last = trimmed.last, Self.quotes.contains(first), Self.quotes.contains(last) {
+            text = String(trimmed.dropFirst().dropLast()).trimmingCharacters(in: .whitespaces)
+            wholeWord = true
+        } else {
+            text = trimmed
+            wholeWord = false
+        }
+    }
+
+    public func matches(_ haystack: String) -> Bool {
+        guard !text.isEmpty else { return false }
+        var searchRange = haystack.startIndex..<haystack.endIndex
+        while let found = haystack.range(of: text, options: [.caseInsensitive, .diacriticInsensitive], range: searchRange) {
+            guard wholeWord else { return true }
+            let before = found.lowerBound > haystack.startIndex ? haystack[haystack.index(before: found.lowerBound)] : nil
+            let after = found.upperBound < haystack.endIndex ? haystack[found.upperBound] : nil
+            func isWordCharacter(_ character: Character?) -> Bool {
+                character.map { $0.isLetter || $0.isNumber } ?? false
+            }
+            if !isWordCharacter(before), !isWordCharacter(after) { return true }
+            searchRange = found.upperBound..<haystack.endIndex
+        }
+        return false
+    }
+
+    public func matches(_ programme: Programme) -> Bool {
+        matches(programme.title) || (programme.description.map(matches) ?? false)
+    }
+}
+
 /// Which channels a followed topic is looked for on.
 public enum FollowScope: Codable, Hashable, Sendable {
     case favourites
@@ -82,10 +122,7 @@ public enum Following {
             if let id = channel.tvgID { channelsByGuideID[id.lowercased(), default: []].append(channel) }
         }
 
-        func mentions(_ programme: Programme, _ term: String) -> Bool {
-            programme.title.range(of: term, options: [.caseInsensitive, .diacriticInsensitive]) != nil
-                || programme.description?.range(of: term, options: [.caseInsensitive, .diacriticInsensitive]) != nil
-        }
+        let terms = Dictionary(uniqueKeysWithValues: active.map { ($0.id, $0.searchTerms.map(SearchTerm.init)) })
 
         struct Found {
             var programme: Programme
@@ -98,7 +135,7 @@ public enum Following {
             for programme in guide.programmes(channelID: guideID, from: date, to: end) {
                 var matched: [String] = []
                 var showing: [Channel] = []
-                for topic in active where topic.searchTerms.contains(where: { mentions(programme, $0) }) {
+                for topic in active where terms[topic.id]?.contains(where: { $0.matches(programme) }) == true {
                     // Only the channels this topic is allowed on count for it.
                     let allowed = allowedKeys[topic.id].map { keys in channels.filter { keys.contains($0.key) } } ?? channels
                     guard !allowed.isEmpty else { continue }

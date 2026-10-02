@@ -204,10 +204,10 @@ struct FollowingTopicForm: View {
             Section {
                 TextField("Name, for example Sweden", text: $name)
                     .autocorrectionDisabled()
-                TextField("Other keywords: Sverige, SWE", text: $keywords)
+                TextField("Other keywords: Sverige, \"SWE\"", text: $keywords)
                     .autocorrectionDisabled()
             } footer: {
-                Text("Playa looks through the TV guide for programmes that mention the name or any of the other keywords, in their title or description. Separate keywords with commas.")
+                Text("Playa looks through the TV guide for programmes that mention the name or any of the other keywords, in their title or description. Separate keywords with commas. Put a keyword in quotes to match it only as a whole word: \"SWE\" finds SWE–NOR but not sweet or answers.")
             }
             Section {
                 Picker("Look on", selection: $scope) {

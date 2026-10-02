@@ -54,13 +54,13 @@ public struct Guide: Sendable {
     /// after it and mentions `query` in its title or description.
     public func search(_ query: String, from date: Date, horizon: TimeInterval) -> [String: Programme] {
         let end = date.addingTimeInterval(horizon)
+        // In quotes, the query only matches as a whole word.
+        let term = SearchTerm(query)
         var hits: [String: Programme] = [:]
         for (channelID, _) in programmes {
-            let match = programmes(channelID: channelID, from: date, to: end).first { programme in
-                programme.title.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil
-                    || programme.description?.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+            if let match = programmes(channelID: channelID, from: date, to: end).first(where: term.matches) {
+                hits[channelID] = match
             }
-            if let match { hits[channelID] = match }
         }
         return hits
     }
