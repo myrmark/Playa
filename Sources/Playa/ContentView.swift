@@ -12,6 +12,7 @@ enum ChannelFilter: Hashable {
 struct ContentView: View {
     @StateObject private var store = PlaylistStore()
     @StateObject private var epg = EPGStore()
+    @StateObject private var resume = ResumeStore()
     /// Advances once a minute so now/next labels follow the clock.
     @State private var now = Date()
 
@@ -39,6 +40,7 @@ struct ContentView: View {
             // don't re-render the (potentially huge) channel list.
             PlayerPane(
                 channel: selectedChannel,
+                resume: resume,
                 playlistError: store.errorMessage,
                 spaceTogglesPause: !isSearching,
                 programmes: epg.guide.nowAndNext(channelID: selectedChannel?.tvgID, at: now),
@@ -327,6 +329,7 @@ struct ContentView: View {
                         shows: visibleShows,
                         generation: listGeneration,
                         playlist: store.playlist,
+                        resume: resume,
                         favourites: store.favourites,
                         openShow: $openShow,
                         selection: $selectedChannel,
@@ -338,11 +341,13 @@ struct ContentView: View {
                         channels: visibleChannels,
                         generation: listGeneration,
                         favourites: store.favourites,
-                        guideStamp: epg.version &* 1_000_000 &+ Int(now.timeIntervalSince1970 / 60) % 1_000_000,
+                        guideStamp: epg.version &* 1_000_000 &+ Int(now.timeIntervalSince1970 / 60) % 1_000_000 &+ resume.version,
                         selection: $selectedChannel,
                         toggleFavourite: store.toggleFavourite,
                         subtitle: { [guide = epg.guide, now] channel in
-                            guide.nowAndNext(channelID: channel.tvgID, at: now).now?.title
+                            channel.kind == .live
+                                ? guide.nowAndNext(channelID: channel.tvgID, at: now).now?.title
+                                : resume.label(for: channel)
                         }
                     )
                 }
@@ -407,6 +412,7 @@ private extension ChannelKind {
 
 private struct PlayerPane: View {
     let channel: Channel?
+    let resume: ResumeStore
     let playlistError: String?
     /// Off while the search field has focus, so a space can be typed there.
     let spaceTogglesPause: Bool
@@ -417,6 +423,8 @@ private struct PlayerPane: View {
     @StateObject private var player = MPVPlayer()
     /// Slider value while the user is dragging the seek bar.
     @State private var scrubPosition: Double?
+    /// What the player is showing, kept so its position can be saved when the selection moves on.
+    @State private var playing: Channel?
 
     var body: some View {
         ZStack {
@@ -441,9 +449,23 @@ private struct PlayerPane: View {
             controls
         }
         // Keyed on the stream, so a playlist refresh that renumbers channels doesn't restart playback.
-        .onChange(of: channel?.url, initial: true) { _, url in
-            if let url { player.play(url: url) }
+        .onChange(of: channel?.url, initial: true) { _, _ in
+            savePosition(isFinal: true)
+            playing = channel
+            if let channel { player.play(url: channel.url, startAt: resume.resumePosition(for: channel)) }
         }
+        .onChange(of: player.position) { _, position in
+            if Int(position) % 10 == 0, position > 0 { savePosition(isFinal: false) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+            savePosition(isFinal: true)
+        }
+    }
+
+    private func savePosition(isFinal: Bool) {
+        // No length yet means the file hasn't loaded, so the position isn't meaningful.
+        guard let playing, player.duration > 0 else { return }
+        resume.record(playing, position: player.position, duration: player.duration, isFinal: isFinal)
     }
 
     private var programmeLine: String? {
@@ -504,6 +526,15 @@ private struct PlayerPane: View {
             }
             .keyboardShortcut(spaceTogglesPause ? KeyboardShortcut(.space, modifiers: []) : nil)
             .disabled(channel == nil)
+
+            if let channel, channel.kind != .live {
+                Button {
+                    player.seek(to: 0)
+                } label: {
+                    Image(systemName: "backward.end.fill")
+                }
+                .help("Start from the beginning")
+            }
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(channel?.name ?? "")

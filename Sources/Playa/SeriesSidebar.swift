@@ -7,6 +7,7 @@ struct SeriesSidebar: View {
     /// Changes whenever `shows` does.
     let generation: Int
     let playlist: Playlist
+    @ObservedObject var resume: ResumeStore
     let favourites: Set<String>
     @Binding var openShow: SeriesShow?
     @Binding var selection: Channel?
@@ -133,10 +134,10 @@ struct SeriesSidebar: View {
                 channels: entries.map { playlist.channels[$0.channelID] },
                 generation: show.id &* 10_000 &+ (season?.number ?? 0) &+ playlist.channels.count &* 7,
                 favourites: favourites,
-                guideStamp: 0,
+                guideStamp: resume.version,
                 selection: $selection,
                 toggleFavourite: toggleFavourite,
-                subtitle: { _ in nil },
+                subtitle: { resume.label(for: $0) },
                 title: { labels[$0.id] ?? $0.name }
             )
             .padding(.top, 6)

@@ -55,12 +55,16 @@ final class MPVPlayer: ObservableObject {
         thread.start()
     }
 
-    func play(url: String) {
+    func play(url: String, startAt start: Double? = nil) {
         errorMessage = nil
         isBuffering = true
         position = 0
         duration = 0
-        command(["loadfile", url])
+        if let start {
+            command(["loadfile", url, "replace", "-1", "start=\(Int(start))"])
+        } else {
+            command(["loadfile", url])
+        }
         queue.async { mpv_set_property_string(self.mpv, "pause", "no") }
     }
 
