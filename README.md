@@ -8,7 +8,7 @@ A free, native IPTV player for macOS. Point it at the M3U playlist from your pro
 
 Playa is a player only. It ships with no channels or streams; you bring your own playlist.
 
-> **Status: early.** It works well for daily use on the author's Mac, but it has to be built from source and needs Homebrew's mpv installed. A self-contained download is planned.
+> **Status: early.** It works well for daily use on the author's Mac, but for now it has to be built from source. A ready-made download is planned.
 
 ## Features
 
@@ -17,25 +17,23 @@ Playa is a player only. It ships with no channels or streams; you bring your own
 - **TV guide**: now/next on every channel, plus a full-window schedule grid. The guide is read from the playlist's XMLTV address, or found automatically for Xtream-style `get.php` playlists.
 - **Favourites**: star channels, films and shows.
 - **Search** across channels, films and shows.
-- **Plays almost anything**: playback uses [mpv](https://mpv.io), with hardware decoding.
+- **Plays almost anything**: playback uses [mpv](https://mpv.io), with hardware decoding and Metal rendering.
 - **Built for big playlists**: tested with a playlist of about 290,000 entries.
 
 ## Requirements
 
 - macOS 14 or later
 - Xcode or the Xcode Command Line Tools
-- [Homebrew](https://brew.sh)
 
 ## Build and run
 
 ```sh
-brew install mpv pkg-config
 git clone <this repository>
 cd Playa
 ./build-app.sh run
 ```
 
-This builds `Playa.app` in the repository folder and launches it. Run the tests with `swift test`.
+This builds `Playa.app` in the repository folder and launches it. The first build downloads the prebuilt mpv libraries from [MPVKit](https://github.com/mpvkit/MPVKit), a few hundred megabytes. The resulting app is self-contained and needs nothing else installed. Run the tests with `swift test`.
 
 ## Using it
 
@@ -71,9 +69,8 @@ Playlist addresses usually contain your provider login. Playa keeps them on your
 |---|---|
 | `Sources/PlayaCore` | Playlist, guide and series parsing. No UI; covered by tests. |
 | `Sources/Playa` | The SwiftUI/AppKit app and the mpv player wrapper. |
-| `Sources/Cmpv` | Module map exposing libmpv to Swift. |
 | `Support` | `Info.plist`, the icon and the script that draws it. |
 
 ## Licence
 
-Playa is released under the [MIT Licence](LICENSE). It links against mpv, which is licensed separately under the GPL/LGPL.
+Playa is released under the [MIT Licence](LICENSE). It links against mpv and FFmpeg through MPVKit's LGPL build; those libraries keep their own licences.

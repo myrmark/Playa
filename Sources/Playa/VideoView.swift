@@ -5,16 +5,19 @@ struct VideoView: NSViewRepresentable {
     let player: MPVPlayer
 
     func makeNSView(context: Context) -> VideoHostView {
-        VideoHostView(player: player)
+        VideoHostView(layer: player.videoLayer)
     }
 
     func updateNSView(_ nsView: VideoHostView, context: Context) {}
 }
 
 final class VideoHostView: NSView {
-    init(player: MPVPlayer) {
+    private let videoLayer: CAMetalLayer
+
+    init(layer: CAMetalLayer) {
+        videoLayer = layer
         super.init(frame: .zero)
-        layer = MPVVideoLayer(player: player)
+        self.layer = layer
         wantsLayer = true
     }
 
@@ -22,9 +25,20 @@ final class VideoHostView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    override func layout() {
+        super.layout()
+        updateDrawableSize()
+    }
+
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
-        layer?.contentsScale = window?.backingScaleFactor ?? 2
+        updateDrawableSize()
+    }
+
+    private func updateDrawableSize() {
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        videoLayer.contentsScale = scale
+        videoLayer.drawableSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
     }
 
     override func mouseDown(with event: NSEvent) {

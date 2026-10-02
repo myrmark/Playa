@@ -1,9 +1,8 @@
 import AppKit
-import Cmpv
-import OpenGL.GL3
+import Libmpv
 
-/// Thin wrapper around a libmpv handle. Video is drawn by `MPVVideoLayer`
-/// through mpv's OpenGL render API.
+/// Thin wrapper around a libmpv handle. mpv draws straight into `videoLayer`
+/// with Metal (through MoltenVK), on its own thread.
 final class MPVPlayer: ObservableObject {
     struct Track: Identifiable, Hashable {
         enum Kind { case audio, subtitle }
@@ -38,7 +37,8 @@ final class MPVPlayer: ObservableObject {
     /// mpv's synchronous calls can block for seconds while it tears down a network
     /// stream, so they never run on the main thread.
     private let queue = DispatchQueue(label: "mpv-commands", qos: .userInitiated)
-    fileprivate var renderContext: OpaquePointer?
+    /// The layer mpv renders into; hosted by `VideoHostView`.
+    let videoLayer = VideoLayer()
 
     static let autoReconnectKey = "autoReconnect"
     /// Pause between closing one stream and opening the next. mpv closes the old connection
@@ -65,8 +65,15 @@ final class MPVPlayer: ObservableObject {
 
     init() {
         mpv = mpv_create()
-        mpv_set_option_string(mpv, "vo", "libmpv")
-        mpv_set_option_string(mpv, "hwdec", "auto-safe")
+        videoLayer.framebufferOnly = true
+        videoLayer.backgroundColor = NSColor.black.cgColor
+        // mpv takes the layer as an integer "window id" and must have it before it initialises.
+        var layerAddress = Int64(Int(bitPattern: Unmanaged.passUnretained(videoLayer).toOpaque()))
+        mpv_set_option(mpv, "wid", MPV_FORMAT_INT64, &layerAddress)
+        mpv_set_option_string(mpv, "vo", "gpu-next")
+        mpv_set_option_string(mpv, "gpu-api", "vulkan")
+        mpv_set_option_string(mpv, "gpu-context", "moltenvk")
+        mpv_set_option_string(mpv, "hwdec", "videotoolbox")
         mpv_set_option_string(mpv, "keep-open", "yes")
         mpv_set_option_string(mpv, "cache", "yes")
         mpv_set_option_string(mpv, "demuxer-max-bytes", "64MiB")
@@ -76,7 +83,8 @@ final class MPVPlayer: ObservableObject {
         mpv_set_option_string(mpv, "ytdl", "no")
         mpv_initialize(mpv)
 
-        mpv_request_log_messages(mpv, "warn")
+        // PLAYA_MPV_LOG=v (or debug) prints mpv's own log to stderr when run from a terminal.
+        mpv_request_log_messages(mpv, ProcessInfo.processInfo.environment["PLAYA_MPV_LOG"] ?? "warn")
         mpv_observe_property(mpv, 0, "pause", MPV_FORMAT_FLAG)
         mpv_observe_property(mpv, 0, "paused-for-cache", MPV_FORMAT_FLAG)
         mpv_observe_property(mpv, 0, "time-pos", MPV_FORMAT_DOUBLE)
@@ -295,109 +303,17 @@ final class MPVPlayer: ObservableObject {
             break
         }
     }
-
-    // MARK: Rendering
-
-    /// Must be called with the layer's OpenGL context current.
-    fileprivate func createRenderContext(for layer: MPVVideoLayer) {
-        guard renderContext == nil else { return }
-        let api = strdup("opengl")
-        defer { free(api) }
-        var glParams = mpv_opengl_init_params()
-        glParams.get_proc_address = { _, name in
-            // RTLD_DEFAULT
-            dlsym(UnsafeMutableRawPointer(bitPattern: -2), name)
-        }
-        withUnsafeMutablePointer(to: &glParams) { glParamsPointer in
-            var params = [
-                mpv_render_param(type: MPV_RENDER_PARAM_API_TYPE, data: UnsafeMutableRawPointer(api)),
-                mpv_render_param(type: MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, data: UnsafeMutableRawPointer(glParamsPointer)),
-                mpv_render_param(),
-            ]
-            let status = mpv_render_context_create(&renderContext, mpv, &params)
-            if status < 0 {
-                NSLog("mpv_render_context_create failed: %s", mpv_error_string(status))
-            }
-        }
-        guard let renderContext else { return }
-        mpv_render_context_set_update_callback(renderContext, { context in
-            let layer = Unmanaged<MPVVideoLayer>.fromOpaque(context!).takeUnretainedValue()
-            DispatchQueue.main.async { layer.setNeedsDisplay() }
-        }, Unmanaged.passUnretained(layer).toOpaque())
-    }
 }
 
-final class MPVVideoLayer: CAOpenGLLayer {
-    private let player: MPVPlayer
-
-    init(player: MPVPlayer) {
-        self.player = player
-        super.init()
-        isOpaque = true
-        isAsynchronous = false
-        needsDisplayOnBoundsChange = true
-        autoresizingMask = [.layerWidthSizable, .layerHeightSizable]
-        backgroundColor = NSColor.black.cgColor
-    }
-
-    override init(layer: Any) {
-        player = (layer as! MPVVideoLayer).player
-        super.init(layer: layer)
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func copyCGLPixelFormat(forDisplayMask mask: UInt32) -> CGLPixelFormatObj {
-        let attributes: [CGLPixelFormatAttribute] = [
-            kCGLPFAOpenGLProfile, CGLPixelFormatAttribute(kCGLOGLPVersion_3_2_Core.rawValue),
-            kCGLPFAAccelerated,
-            kCGLPFADoubleBuffer,
-            kCGLPFAAllowOfflineRenderers,
-            CGLPixelFormatAttribute(0),
-        ]
-        var pixelFormat: CGLPixelFormatObj?
-        var count: GLint = 0
-        CGLChoosePixelFormat(attributes, &pixelFormat, &count)
-        return pixelFormat ?? super.copyCGLPixelFormat(forDisplayMask: mask)
-    }
-
-    override func copyCGLContext(forPixelFormat pixelFormat: CGLPixelFormatObj) -> CGLContextObj {
-        let context = super.copyCGLContext(forPixelFormat: pixelFormat)
-        CGLSetCurrentContext(context)
-        player.createRenderContext(for: self)
-        return context
-    }
-
-    override func draw(
-        inCGLContext context: CGLContextObj,
-        pixelFormat: CGLPixelFormatObj,
-        forLayerTime time: CFTimeInterval,
-        displayTime: UnsafePointer<CVTimeStamp>?
-    ) {
-        guard let renderContext = player.renderContext else {
-            glClearColor(0, 0, 0, 1)
-            glClear(GLbitfield(GL_COLOR_BUFFER_BIT))
-            return
-        }
-        var framebuffer: GLint = 0
-        glGetIntegerv(GLenum(GL_DRAW_FRAMEBUFFER_BINDING), &framebuffer)
-        var viewport = [GLint](repeating: 0, count: 4)
-        glGetIntegerv(GLenum(GL_VIEWPORT), &viewport)
-
-        var fbo = mpv_opengl_fbo(fbo: framebuffer, w: viewport[2], h: viewport[3], internal_format: 0)
-        var flipY: CInt = 1
-        withUnsafeMutablePointer(to: &fbo) { fboPointer in
-            withUnsafeMutablePointer(to: &flipY) { flipPointer in
-                var params = [
-                    mpv_render_param(type: MPV_RENDER_PARAM_OPENGL_FBO, data: UnsafeMutableRawPointer(fboPointer)),
-                    mpv_render_param(type: MPV_RENDER_PARAM_FLIP_Y, data: UnsafeMutableRawPointer(flipPointer)),
-                    mpv_render_param(),
-                ]
-                mpv_render_context_render(renderContext, &params)
+final class VideoLayer: CAMetalLayer {
+    // MoltenVK briefly sets the drawable to 1x1 to flush a presentation, which makes the
+    // picture flicker and can leave it stuck at that size. See mpv-player/mpv#13651.
+    override var drawableSize: CGSize {
+        get { super.drawableSize }
+        set {
+            if newValue.width > 1, newValue.height > 1 {
+                super.drawableSize = newValue
             }
         }
-        glFlush()
     }
 }
