@@ -17,7 +17,7 @@ Playa is being prepared for the App Store, as one purchase covering Mac and Appl
 - **TV guide**: now/next on every channel with programme descriptions, plus a full-window schedule grid. The guide is read from the playlist's XMLTV address, or found automatically for Xtream-style `get.php` playlists.
 - **Favourites and lists**: star channels, films and shows, or collect them in your own named lists and arrange them in any order. A Recently Watched list keeps itself.
 - **Following**: add the teams, sports or shows you follow, with alternative spellings, and see every upcoming broadcast in one list. The best channel is picked by your favourites and preferred languages.
-- **PIN lock**: an optional PIN on each device, so the app can't be used unsupervised.
+- **PIN lock**: an optional PIN on each device that keeps the app private.
 - **Hide groups** you never use, so a provider's hundreds of groups shrink to the ones you care about.
 - **Search** across channels, films and shows, and through the TV guide: type a programme's name to find which channel is showing it, now or later.
 - **Plays almost anything**: playback uses [mpv](https://mpv.io), with hardware decoding and Metal rendering.

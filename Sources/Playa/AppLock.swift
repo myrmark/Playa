@@ -1,7 +1,7 @@
 import Foundation
 import PlayaCore
 
-/// An optional PIN that locks the whole app, for instance so children can't use it unsupervised.
+/// An optional PIN that locks the whole app, to keep it private from others using the device.
 /// The PIN belongs to this device and is not synced.
 @MainActor
 final class AppLock: ObservableObject {

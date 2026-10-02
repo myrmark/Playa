@@ -46,6 +46,7 @@ PLAYBACK
 
 SYNC AND PRIVACY
 • Playlists, favourites, lists and resume positions sync through your own iCloud account
+• Optional PIN lock on each device
 • No accounts, no ads, no tracking
 • One purchase covers iPhone, iPad, Mac and Apple TV
 
