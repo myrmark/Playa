@@ -219,12 +219,8 @@ struct ContentView: View {
                 .help("Download the playlist again")
                 .disabled(store.active == nil || store.isLoading)
 
-                Button {
-                    showingPlaylistSheet = true
-                } label: {
-                    Label("Add playlist…", systemImage: "plus")
-                }
-                .help("Add a playlist from a URL or a file")
+                // Which playlist is open, switching between them, and adding or removing one.
+                playlistMenu
             }
         }
         .sheet(isPresented: $showingPlaylistSheet) {
@@ -559,7 +555,9 @@ struct ContentView: View {
             }
         } label: {
             Label(store.active?.name ?? "No playlist", systemImage: "list.bullet.rectangle")
+                .labelStyle(.titleAndIcon)
         }
+        .help("Switch playlist, or add or remove one")
         .confirmationDialog(
             "Remove “\(playlistToRemove?.name ?? "")”?",
             isPresented: Binding(get: { playlistToRemove != nil }, set: { if !$0 { playlistToRemove = nil } })
@@ -629,10 +627,6 @@ struct ContentView: View {
 
     private var sidebar: some View {
         VStack(spacing: 0) {
-            playlistMenu
-                .padding(.horizontal, 10)
-                .padding(.top, 8)
-
             // Only shown when the playlist mixes live TV with on-demand content.
             if store.playlist.countByKind.count > 1 {
                 Picker("Section", selection: $section) {
