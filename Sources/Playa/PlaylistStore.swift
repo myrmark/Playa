@@ -438,6 +438,41 @@ final class PlaylistStore: ObservableObject {
         return true
     }
 
+    /// Renames a playlist or points it at another address. A new address is downloaded first
+    /// and only kept if that works. Favourites and lists carry over where the channels do.
+    func edit(_ id: UUID, name: String, url urlString: String) async -> Bool {
+        let urlString = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let index = saved.firstIndex(where: { $0.id == id }) else { return false }
+        var entry = saved[index]
+        if !name.isEmpty { entry.name = name }
+        if urlString != entry.url {
+            if let existing = saved.first(where: { $0.url == urlString && $0.id != id }) {
+                errorMessage = "“\(existing.name)” already uses this address."
+                return false
+            }
+            entry.url = urlString
+            entry.bookmark = nil
+            entry.lastChannelURL = nil
+            #if os(macOS)
+            if let fileURL = URL(string: urlString), fileURL.isFileURL {
+                entry.bookmark = try? fileURL.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+            }
+            #endif
+            // Without the old digest the download can't be mistaken for an unchanged playlist.
+            defaults.removeObject(forKey: cacheFiles(for: entry).digestKey)
+            guard case .updated(let parsed) = await download(entry, quietly: false) else { return false }
+            // The guide on disk belongs to the old address.
+            try? FileManager.default.removeItem(at: cacheDirectory.appendingPathComponent("guide-\(id.uuidString).xml"))
+            if activeID == id { playlist = parsed }
+        }
+        guard let index = saved.firstIndex(where: { $0.id == id }) else { return false }
+        saved[index] = entry
+        persist()
+        pushPlaylists()
+        return true
+    }
+
     func select(_ id: UUID) async {
         guard id != activeID, let entry = saved.first(where: { $0.id == id }) else { return }
         activeID = id

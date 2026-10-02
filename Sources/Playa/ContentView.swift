@@ -78,6 +78,7 @@ struct ContentView: View {
     /// The show whose episodes the Series section is showing, if any.
     @State private var openShow: SeriesShow?
     @State private var showingPlaylistSheet = false
+    @State private var playlistToEdit: SavedPlaylist?
     @State private var showingGuide = false
     @State private var playlistToRemove: SavedPlaylist?
     @State private var listPrompt: ListPrompt?
@@ -225,6 +226,9 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showingPlaylistSheet) {
             PlaylistSheet(store: store)
+        }
+        .sheet(item: $playlistToEdit) { entry in
+            PlaylistSheet(store: store, editing: entry)
         }
         .sheet(isPresented: $showingGroupChooser) {
             GroupChooser(store: store, kind: section)
@@ -549,6 +553,7 @@ struct ContentView: View {
             Divider()
             Button("Add Playlist…") { showingPlaylistSheet = true }
             if let active = store.active {
+                Button("Edit “\(active.name)”…") { playlistToEdit = active }
                 Button("Remove “\(active.name)”", role: .destructive) {
                     playlistToRemove = active
                 }
@@ -1047,15 +1052,19 @@ private struct PlayerPane: View {
 
 private struct PlaylistSheet: View {
     @ObservedObject var store: PlaylistStore
+    /// The playlist being changed, or nil when adding one.
+    var editing: SavedPlaylist?
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var urlText = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Add Playlist")
+            Text(editing == nil ? "Add Playlist" : "Edit Playlist")
                 .font(.headline)
-            Text("Paste the M3U URL from your IPTV provider, or choose a playlist file on this Mac. Your other playlists are kept.")
+            Text(editing == nil
+                 ? "Paste the M3U URL from your IPTV provider, or choose a playlist file on this Mac. Your other playlists are kept."
+                 : "Change the name, or point the playlist at a new address or file. A new address is downloaded before it replaces the old one; favourites and lists stay with the channels that are still there.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
@@ -1082,9 +1091,14 @@ private struct PlaylistSheet: View {
                 Spacer()
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Button("Add") {
+                Button(editing == nil ? "Add" : "Save") {
                     Task {
-                        if await store.add(name: name, url: urlText) { dismiss() }
+                        let isDone = if let editing {
+                            await store.edit(editing.id, name: name, url: urlText)
+                        } else {
+                            await store.add(name: name, url: urlText)
+                        }
+                        if isDone { dismiss() }
                     }
                 }
                 .keyboardShortcut(.defaultAction)
@@ -1093,7 +1107,13 @@ private struct PlaylistSheet: View {
         }
         .frame(width: 520)
         .padding(20)
-        .onAppear { store.errorMessage = nil }
+        .onAppear {
+            store.errorMessage = nil
+            if let editing {
+                name = editing.name
+                urlText = editing.url
+            }
+        }
     }
 
     private func chooseFile() {
