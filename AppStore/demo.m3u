@@ -1,4 +1,4 @@
-#EXTM3U
+#EXTM3U url-tvg="https://raw.githubusercontent.com/myrmark/Playa/main/AppStore/demo-guide.xml"
 #EXTINF:-1 tvg-id="demo.one" group-title="Demo channels",Big Buck Bunny (test stream)
 https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8
 #EXTINF:-1 tvg-id="demo.two" group-title="Demo channels",Tears of Steel (test stream)

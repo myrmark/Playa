@@ -77,7 +77,7 @@ On Apple TV: the app opens on the Add Playlist screen. Enter the address above a
 
 On the Mac: click + in the toolbar, paste the address and click Add. Click a channel in the sidebar, then press the Play button.
 
-The demo playlist has no TV guide, so guide features show "no programme information" with it.
+The demo playlist comes with an invented TV guide for its three demo channels, so the guide features can be tried: on Apple TV choose Show Guide in Live TV, on the Mac click the calendar button in the toolbar.
 
 The films visible in the screenshots are Big Buck Bunny and Sintel, open films by the Blender Foundation under the Creative Commons Attribution 3.0 licence, credited in the description.
 
