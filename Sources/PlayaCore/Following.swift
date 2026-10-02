@@ -1,10 +1,28 @@
 import Foundation
 
+/// Text prepared for fast, forgiving matching: lower-cased, accents removed, as raw bytes.
+/// Comparing bytes is many times faster than comparing strings with case and accent
+/// options, which matters when a guide holds over a hundred thousand programmes.
+public struct FoldedText: Sendable {
+    public let bytes: [UInt8]
+
+    public init(_ text: String) {
+        var text = text
+        let ascii = text.withUTF8 { buffer -> [UInt8]? in
+            guard buffer.allSatisfy({ $0 < 0x80 }) else { return nil }
+            return buffer.map { $0 >= 65 && $0 <= 90 ? $0 + 32 : $0 }
+        }
+        // Plain ASCII, the common case, only needs lower-casing.
+        bytes = ascii ?? Array(text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).utf8)
+    }
+}
+
 /// A word or phrase to look for in programme text. Written in quotes, it only matches as a
 /// whole word: "SWE" finds "SWE–NOR" but not "sweet" or "answers".
 public struct SearchTerm: Hashable, Sendable {
     public let text: String
     public let wholeWord: Bool
+    private let needle: [UInt8]
 
     private static let quotes: Set<Character> = ["\"", "“", "”", "„", "«", "»"]
 
@@ -17,26 +35,53 @@ public struct SearchTerm: Hashable, Sendable {
             text = trimmed
             wholeWord = false
         }
+        needle = FoldedText(text).bytes
     }
 
     public func matches(_ haystack: String) -> Bool {
-        guard !text.isEmpty else { return false }
-        var searchRange = haystack.startIndex..<haystack.endIndex
-        while let found = haystack.range(of: text, options: [.caseInsensitive, .diacriticInsensitive], range: searchRange) {
-            guard wholeWord else { return true }
-            let before = found.lowerBound > haystack.startIndex ? haystack[haystack.index(before: found.lowerBound)] : nil
-            let after = found.upperBound < haystack.endIndex ? haystack[found.upperBound] : nil
-            func isWordCharacter(_ character: Character?) -> Bool {
-                character.map { $0.isLetter || $0.isNumber } ?? false
-            }
-            if !isWordCharacter(before), !isWordCharacter(after) { return true }
-            searchRange = found.upperBound..<haystack.endIndex
-        }
-        return false
+        matches(FoldedText(haystack))
     }
 
     public func matches(_ programme: Programme) -> Bool {
         matches(programme.title) || (programme.description.map(matches) ?? false)
+    }
+
+    public func matches(_ haystack: FoldedText) -> Bool {
+        guard !needle.isEmpty, haystack.bytes.count >= needle.count else { return false }
+        return haystack.bytes.withUnsafeBufferPointer { hay in
+            needle.withUnsafeBufferPointer { needle in
+                var offset = 0
+                while offset + needle.count <= hay.count,
+                      let found = memmem(hay.baseAddress! + offset, hay.count - offset, needle.baseAddress!, needle.count) {
+                    let position = hay.baseAddress!.distance(to: found.assumingMemoryBound(to: UInt8.self))
+                    guard wholeWord else { return true }
+                    if !Self.isWordCharacter(endingAt: position, in: hay),
+                       !Self.isWordCharacter(startingAt: position + needle.count, in: hay) { return true }
+                    offset = position + 1
+                }
+                return false
+            }
+        }
+    }
+
+    /// Whether the character beginning at `index` is a letter or digit.
+    private static func isWordCharacter(startingAt index: Int, in bytes: UnsafeBufferPointer<UInt8>) -> Bool {
+        guard index < bytes.count else { return false }
+        let byte = bytes[index]
+        if byte < 0x80 { return (byte >= 48 && byte <= 57) || (byte >= 97 && byte <= 122) || (byte >= 65 && byte <= 90) }
+        // Not ASCII: decode the whole character, since a dash such as "–" is not part of a word.
+        let end = min(index + 4, bytes.count)
+        let character = String(decoding: UnsafeBufferPointer(rebasing: bytes[index..<end]), as: UTF8.self).first
+        return character.map { $0.isLetter || $0.isNumber } ?? false
+    }
+
+    /// Whether the character ending just before `index` is a letter or digit.
+    private static func isWordCharacter(endingAt index: Int, in bytes: UnsafeBufferPointer<UInt8>) -> Bool {
+        guard index > 0 else { return false }
+        var start = index - 1
+        // Step back over UTF-8 continuation bytes to the start of the character.
+        while start > 0, bytes[start] & 0xC0 == 0x80, index - start < 4 { start -= 1 }
+        return isWordCharacter(startingAt: start, in: bytes)
     }
 }
 
@@ -132,15 +177,24 @@ public enum Following {
         var found: [String: Found] = [:]
         let end = date.addingTimeInterval(horizon)
         for (guideID, channels) in channelsByGuideID {
+            // Work out once which topics may use these channels at all. A guide channel that
+            // no topic is allowed on, typical when topics are limited to a list, is skipped
+            // without reading a single programme.
+            let candidates: [(topic: FollowedTopic, terms: [SearchTerm], channels: [Channel])] = active.compactMap { topic in
+                let allowed = allowedKeys[topic.id].map { keys in channels.filter { keys.contains($0.key) } } ?? channels
+                return allowed.isEmpty ? nil : (topic, terms[topic.id] ?? [], allowed)
+            }
+            guard !candidates.isEmpty else { continue }
+
             for programme in guide.programmes(channelID: guideID, from: date, to: end) {
+                // Each programme's text is prepared once and then checked against every keyword.
+                let title = FoldedText(programme.title)
+                let description = programme.description.map(FoldedText.init)
                 var matched: [String] = []
                 var showing: [Channel] = []
-                for topic in active where terms[topic.id]?.contains(where: { $0.matches(programme) }) == true {
-                    // Only the channels this topic is allowed on count for it.
-                    let allowed = allowedKeys[topic.id].map { keys in channels.filter { keys.contains($0.key) } } ?? channels
-                    guard !allowed.isEmpty else { continue }
-                    matched.append(topic.name)
-                    for channel in allowed where !showing.contains(where: { $0.id == channel.id }) { showing.append(channel) }
+                for candidate in candidates where candidate.terms.contains(where: { $0.matches(title) || (description.map($0.matches) ?? false) }) {
+                    matched.append(candidate.topic.name)
+                    for channel in candidate.channels where !showing.contains(where: { $0.id == channel.id }) { showing.append(channel) }
                 }
                 guard !matched.isEmpty else { continue }
                 // The same event at the same time under the same title is one broadcast.
