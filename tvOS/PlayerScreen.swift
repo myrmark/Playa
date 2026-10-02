@@ -132,6 +132,12 @@ struct PlayerScreen: View {
                     } label: {
                         Label(showsHealth ? "Hide playback details" : "Show playback details", systemImage: "waveform.path.ecg")
                     }
+                    Button {
+                        let all = MPVPlayer.Quality.allCases
+                        player.quality = all[((all.firstIndex(of: player.quality) ?? 0) + 1) % all.count]
+                    } label: {
+                        Label("Picture: \(player.quality.title)", systemImage: "sparkles.tv")
+                    }
                     ForEach(Array(session.channels.enumerated()), id: \.element.id) { position, entry in
                         Button {
                             if position != index {
@@ -351,7 +357,7 @@ private struct HealthOverlay: View {
                 Spacer()
                 VStack(alignment: .leading, spacing: 6) {
                     Text(health.video)
-                    Text("Decoding: \(health.decoder)")
+                    Text("Decoding: \(health.decoder)  ·  picture: \(player.quality.title.lowercased())")
                     Text("Dropped frames: \(health.droppedFrames) (\(recentDrops) in the last 30 s)")
                     Text("  drawing: \(health.droppedDrawing)  ·  decoding: \(health.droppedFrames - health.droppedDrawing)")
                     Text("Screen: \(health.screenRate, specifier: "%.0f") Hz")

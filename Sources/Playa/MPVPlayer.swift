@@ -20,6 +20,49 @@ final class MPVPlayer: ObservableObject {
 
     @Published var isPaused = false { didSet { updateKeepAwake() } }
     @Published var isBuffering = false
+    /// How much work goes into enlarging the picture to the screen. The Apple TV and iPhone
+    /// GPUs may drop frames at the best setting with 1080p50 on a 4K screen.
+    enum Quality: String, CaseIterable {
+        case best, balanced, fast
+
+        var title: String {
+            switch self {
+            case .best: "Best"
+            case .balanced: "Balanced"
+            case .fast: "Fast"
+            }
+        }
+
+        /// mpv's defaults, its "fast" profile, and in between the fast profile with sharper scalers.
+        var options: [(String, String)] {
+            switch self {
+            case .best:
+                [("scale", "lanczos"), ("dscale", "hermite"), ("cscale", "lanczos"), ("dither", "fruit"),
+                 ("correct-downscaling", "yes"), ("linear-downscaling", "yes"), ("sigmoid-upscaling", "yes"),
+                 ("hdr-compute-peak", "auto")]
+            case .balanced:
+                [("scale", "catmull_rom"), ("dscale", "bilinear"), ("cscale", "catmull_rom"), ("dither", "fruit"),
+                 ("correct-downscaling", "no"), ("linear-downscaling", "no"), ("sigmoid-upscaling", "no"),
+                 ("hdr-compute-peak", "no")]
+            case .fast:
+                [("scale", "bilinear"), ("dscale", "bilinear"), ("cscale", "bilinear"), ("dither", "no"),
+                 ("correct-downscaling", "no"), ("linear-downscaling", "no"), ("sigmoid-upscaling", "no"),
+                 ("hdr-compute-peak", "no")]
+            }
+        }
+    }
+
+    static let qualityKey = "pictureQuality"
+
+    /// Applies at once, to the stream that is playing too. Not used on the Mac, which always does its best.
+    @Published var quality = Quality(rawValue: UserDefaults.standard.string(forKey: MPVPlayer.qualityKey) ?? "") ?? .balanced {
+        didSet {
+            UserDefaults.standard.set(quality.rawValue, forKey: Self.qualityKey)
+            let options = quality.options
+            queue.async { for (name, value) in options { mpv_set_property_string(self.mpv, name, value) } }
+        }
+    }
+
     /// The frame rate of the stream last started, or 0 before one has.
     @Published private(set) var videoFPS: Double = 0
     @Published var errorMessage: String? { didSet { updateKeepAwake() } }
@@ -132,16 +175,7 @@ final class MPVPlayer: ObservableObject {
         mpv_set_option_string(mpv, "load-context-menu", "no")
         mpv_set_option_string(mpv, "load-positioning", "no")
         #if !os(macOS)
-        // The Apple TV and iPhone GPUs can't keep up with mpv's quality settings at 1080p50
-        // on a 4K screen and drop frames. These are mpv's "fast" profile, except for the
-        // upscaler: bilinear is visibly soft, and Catmull-Rom is sharp for little more work.
-        for (name, value) in [
-            ("scale", "catmull_rom"), ("dscale", "bilinear"), ("cscale", "bilinear"), ("dither", "no"),
-            ("correct-downscaling", "no"), ("linear-downscaling", "no"), ("sigmoid-upscaling", "no"),
-            ("hdr-compute-peak", "no"), ("deband", "no"),
-        ] {
-            mpv_set_option_string(mpv, name, value)
-        }
+        for (name, value) in quality.options { mpv_set_option_string(mpv, name, value) }
         #endif
         mpv_initialize(mpv)
         videoLayer.onResize = { [weak self] in self?.surfaceResized() }
