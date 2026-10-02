@@ -139,6 +139,7 @@ final class MPVPlayer: ObservableObject {
     /// Whether the current stream has shown a picture at least once.
     private var hasStarted = false
     private var stalls = 0
+    private var streamStart = Date()
     private var retries = 0
     /// When the picture last (re)appeared; a reconnect only counts as successful if it then held.
     private var lastStart = Date.distantPast
@@ -159,6 +160,10 @@ final class MPVPlayer: ObservableObject {
         mpv_set_option_string(mpv, "keep-open", "yes")
         mpv_set_option_string(mpv, "cache", "yes")
         mpv_set_option_string(mpv, "demuxer-max-bytes", "64MiB")
+        mpv_set_option_string(mpv, "demuxer-max-back-bytes", "16MiB")
+        // A live stream that has run its buffer dry stalls again at once if playback resumes on
+        // the first second of data; wait for a few, so one pause replaces a string of them.
+        mpv_set_option_string(mpv, "cache-pause-wait", "4")
         mpv_set_option_string(mpv, "network-timeout", "15")
         mpv_set_option_string(mpv, "input-default-bindings", "no")
         // Streams are direct URLs; the youtube-dl fallback only adds delay and confusing errors.
@@ -207,6 +212,7 @@ final class MPVPlayer: ObservableObject {
         self.isLive = isLive
         hasStarted = false
         stalls = 0
+        streamStart = Date()
         retries = 0
         isReconnecting = false
         tracks = []
@@ -349,6 +355,9 @@ final class MPVPlayer: ObservableObject {
         var needed = 0.0
         /// Times playback has stopped to wait for data since this stream started.
         var stalls = 0
+        /// How long this stream has been open, and the memory the whole app holds.
+        var minutesOpen = 0
+        var memoryMB = 0
     }
 
     /// Safe to call from any thread.
@@ -367,6 +376,15 @@ final class MPVPlayer: ObservableObject {
         health.arriving = number("cache-speed")
         health.needed = (number("video-bitrate") + number("audio-bitrate")) / 8
         health.stalls = stalls
+        health.minutesOpen = Int(Date().timeIntervalSince(streamStart) / 60)
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        if result == KERN_SUCCESS { health.memoryMB = Int(info.phys_footprint / 1_048_576) }
         return health
     }
 
