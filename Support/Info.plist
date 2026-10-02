@@ -10,6 +10,8 @@
     <string>com.filipmalmberg.LaPlaya</string>
     <key>CFBundleExecutable</key>
     <string>LaPlaya</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

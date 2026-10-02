@@ -47,6 +47,8 @@ public struct Playlist: Sendable {
     /// Groups per kind, in the order they first appear.
     public var groupsByKind: [ChannelKind: [String]] = [:]
     public var countByKind: [ChannelKind: Int] = [:]
+    /// Series episodes grouped into shows and seasons.
+    public var shows: [SeriesShow] = []
     /// XMLTV guide URL advertised in the `#EXTM3U` header, if any.
     public var epgURL: String?
 
@@ -123,6 +125,7 @@ public enum M3UParser {
                 pendingGroup = nil
             }
         }
+        playlist.shows = SeriesIndex.build(from: playlist.channels)
         return playlist
     }
 

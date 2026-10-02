@@ -43,8 +43,13 @@ final class PlaylistStore: ObservableObject {
     }
 
     func toggleFavourite(_ channel: Channel) {
-        if favourites.remove(channel.url) == nil {
-            favourites.insert(channel.url)
+        toggleFavourite(key: channel.url)
+    }
+
+    /// Favourites are keyed by stream URL for channels and by `SeriesShow.favouriteKey` for shows.
+    func toggleFavourite(key: String) {
+        if favourites.remove(key) == nil {
+            favourites.insert(key)
         }
         defaults.set(favourites.sorted(), forKey: Self.favouritesKey)
     }

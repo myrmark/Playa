@@ -19,8 +19,13 @@ struct ContentView: View {
     @State private var filter = ChannelFilter.all
     @State private var selectedChannel: Channel?
     @State private var searchText = ""
+    @FocusState private var isSearching: Bool
     @State private var visibleChannels: [Channel] = []
     @State private var listGeneration = 0
+    @State private var filterTask: Task<Void, Never>?
+    @State private var visibleShows: [SeriesShow] = []
+    /// The show whose episodes the Series section is showing, if any.
+    @State private var openShow: SeriesShow?
     @State private var showingPlaylistSheet = false
     @State private var showingGuide = false
     @State private var playlistToRemove: SavedPlaylist?
@@ -35,6 +40,7 @@ struct ContentView: View {
             PlayerPane(
                 channel: selectedChannel,
                 playlistError: store.errorMessage,
+                spaceTogglesPause: !isSearching,
                 programmes: epg.guide.nowAndNext(channelID: selectedChannel?.tvgID, at: now),
                 isFavourite: selectedChannel.map { store.favourites.contains($0.url) } ?? false,
                 toggleFavourite: { if let selectedChannel { store.toggleFavourite(selectedChannel) } }
@@ -101,6 +107,7 @@ struct ContentView: View {
                let match = playlist.channels.first(where: { $0.url == current.url }), match != current {
                 selectedChannel = match
             }
+            openShow = openShow.flatMap { old in playlist.shows.first { $0.name == old.name && $0.group == old.group } }
             if playlist.countByKind[section] == nil {
                 section = ChannelKind.allCases.first { playlist.countByKind[$0] != nil } ?? .live
             }
@@ -119,10 +126,17 @@ struct ContentView: View {
         .onChange(of: section) {
             // Group names differ between live TV, films and series.
             if case .group = filter { filter = .all }
+            openShow = nil
             updateVisibleChannels(in: store.playlist, favourites: store.favourites)
         }
-        .onChange(of: filter) { updateVisibleChannels(in: store.playlist, favourites: store.favourites) }
-        .onChange(of: searchText) { updateVisibleChannels(in: store.playlist, favourites: store.favourites) }
+        .onChange(of: filter) {
+            openShow = nil
+            updateVisibleChannels(in: store.playlist, favourites: store.favourites)
+        }
+        .onChange(of: searchText) {
+            openShow = nil
+            updateVisibleChannels(in: store.playlist, favourites: store.favourites, afterTyping: !searchText.isEmpty)
+        }
         .onChange(of: selectedChannel) { _, channel in
             if let channel { store.lastChannelURL = channel.url }
         }
@@ -135,23 +149,58 @@ struct ContentView: View {
         return hasLiveFavourite ? .favourites : .all
     }
 
-    private func updateVisibleChannels(in playlist: Playlist, favourites: Set<String>) {
-        listGeneration += 1
-        if filter == .all && searchText.isEmpty && playlist.countByKind.count <= 1 {
-            visibleChannels = playlist.channels
-            return
-        }
-        visibleChannels = playlist.channels.filter { channel in
-            guard channel.kind == section else { return false }
-            let matchesFilter: Bool
-            switch filter {
-            case .all: matchesFilter = true
-            case .favourites: matchesFilter = favourites.contains(channel.url)
-            case .group(let group): matchesFilter = channel.group == group
+    /// Filters on a background thread: matching text against a provider-sized playlist
+    /// takes long enough to make typing in the search field stutter.
+    private func updateVisibleChannels(in playlist: Playlist, favourites: Set<String>, afterTyping: Bool = false) {
+        filterTask?.cancel()
+        let section = section, filter = filter, searchText = searchText
+        filterTask = Task {
+            if afterTyping {
+                // Wait for a pause in typing instead of filtering on every keystroke.
+                try? await Task.sleep(for: .milliseconds(150))
+                if Task.isCancelled { return }
             }
-            return matchesFilter
-                && (searchText.isEmpty || channel.name.localizedCaseInsensitiveContains(searchText))
+            let result = await Task.detached(priority: .userInitiated) {
+                Self.visibleItems(in: playlist, section: section, filter: filter, searchText: searchText, favourites: favourites)
+            }.value
+            if Task.isCancelled { return }
+            listGeneration += 1
+            visibleChannels = result.channels
+            visibleShows = result.shows
         }
+    }
+
+    private nonisolated static func visibleItems(
+        in playlist: Playlist, section: ChannelKind, filter: ChannelFilter, searchText: String, favourites: Set<String>
+    ) -> (channels: [Channel], shows: [SeriesShow]) {
+        func matchesSearch(_ name: String) -> Bool {
+            searchText.isEmpty || name.range(of: searchText, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+        }
+        if section == .series {
+            // Series are browsed by show; the episode list comes from the open show.
+            let shows = playlist.shows.filter { show in
+                switch filter {
+                case .all: break
+                case .favourites: guard favourites.contains(show.favouriteKey) else { return false }
+                case .group(let group): guard show.group == group else { return false }
+                }
+                return matchesSearch(show.name)
+            }
+            return ([], shows)
+        }
+        if filter == .all && searchText.isEmpty && playlist.countByKind.count <= 1 {
+            return (playlist.channels, [])
+        }
+        let channels = playlist.channels.filter { channel in
+            guard channel.kind == section else { return false }
+            switch filter {
+            case .all: break
+            case .favourites: guard favourites.contains(channel.url) else { return false }
+            case .group(let group): guard channel.group == group else { return false }
+            }
+            return matchesSearch(channel.name)
+        }
+        return (channels, [])
     }
 
     private var playlistMenu: some View {
@@ -206,6 +255,39 @@ struct ContentView: View {
         }
     }
 
+    // A plain field rather than `.searchable`, which only shows itself above a SwiftUI List.
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField(section.searchPrompt, text: $searchText)
+                .textFieldStyle(.plain)
+                .focused($isSearching)
+                .onExitCommand {
+                    searchText = ""
+                    isSearching = false
+                }
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 7))
+        .padding(.horizontal, 10)
+        .padding(.bottom, 8)
+    }
+
+    private var isListEmpty: Bool {
+        section == .series ? visibleShows.isEmpty : visibleChannels.isEmpty
+    }
+
     private var sidebar: some View {
         VStack(spacing: 0) {
             playlistMenu
@@ -226,7 +308,7 @@ struct ContentView: View {
             }
 
             Picker("Group", selection: $filter) {
-                Text("\(section.allTitle) (\(store.playlist.countByKind[section] ?? 0))").tag(ChannelFilter.all)
+                Text("\(section.allTitle) (\(section == .series ? store.playlist.shows.count : store.playlist.countByKind[section] ?? 0))").tag(ChannelFilter.all)
                 Label("Favourites", systemImage: "star.fill").tag(ChannelFilter.favourites)
                 Divider()
                 ForEach(store.playlist.groupsByKind[section] ?? [], id: \.self) { group in
@@ -237,26 +319,45 @@ struct ContentView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
 
-            ChannelTable(
-                channels: visibleChannels,
-                generation: listGeneration,
-                favourites: store.favourites,
-                guideStamp: epg.version &* 1_000_000 &+ Int(now.timeIntervalSince1970 / 60) % 1_000_000,
-                selection: $selectedChannel,
-                toggleFavourite: store.toggleFavourite,
-                subtitle: { [guide = epg.guide, now] channel in
-                    guide.nowAndNext(channelID: channel.tvgID, at: now).now?.title
+            searchField
+
+            Group {
+                if section == .series {
+                    SeriesSidebar(
+                        shows: visibleShows,
+                        generation: listGeneration,
+                        playlist: store.playlist,
+                        favourites: store.favourites,
+                        openShow: $openShow,
+                        selection: $selectedChannel,
+                        toggleFavouriteKey: store.toggleFavourite(key:),
+                        toggleFavourite: store.toggleFavourite
+                    )
+                } else {
+                    ChannelTable(
+                        channels: visibleChannels,
+                        generation: listGeneration,
+                        favourites: store.favourites,
+                        guideStamp: epg.version &* 1_000_000 &+ Int(now.timeIntervalSince1970 / 60) % 1_000_000,
+                        selection: $selectedChannel,
+                        toggleFavourite: store.toggleFavourite,
+                        subtitle: { [guide = epg.guide, now] channel in
+                            guide.nowAndNext(channelID: channel.tvgID, at: now).now?.title
+                        }
+                    )
                 }
-            )
+            }
             .overlay {
                 if store.isLoading && store.playlist.channels.isEmpty {
                     ProgressView("Loading playlist…\n\(store.downloadedBytes.formatted(.byteCount(style: .file)))")
                         .multilineTextAlignment(.center)
                 } else if store.playlist.channels.isEmpty {
                     ContentUnavailableView("No playlist", systemImage: "tv", description: Text("Add an M3U URL or file to get started."))
-                } else if visibleChannels.isEmpty && filter == .favourites && searchText.isEmpty {
-                    ContentUnavailableView("No favourites yet", systemImage: "star", description: Text("Right-click a channel, or press ⌘D while watching, to add it."))
-                } else if visibleChannels.isEmpty {
+                } else if isListEmpty && filter == .favourites && searchText.isEmpty {
+                    ContentUnavailableView("No favourites yet", systemImage: "star", description: Text(section == .series
+                        ? "Right-click a show to add it."
+                        : "Right-click a channel, or press ⌘D while watching, to add it."))
+                } else if isListEmpty {
                     ContentUnavailableView.search(text: searchText)
                 }
             }
@@ -275,7 +376,6 @@ struct ContentView: View {
                 guideStatus
             }
         }
-        .searchable(text: $searchText, placement: .sidebar, prompt: section.searchPrompt)
     }
 }
 
@@ -292,7 +392,7 @@ private extension ChannelKind {
         switch self {
         case .live: "All channels"
         case .movie: "All films"
-        case .series: "All episodes"
+        case .series: "All shows"
         }
     }
 
@@ -308,6 +408,8 @@ private extension ChannelKind {
 private struct PlayerPane: View {
     let channel: Channel?
     let playlistError: String?
+    /// Off while the search field has focus, so a space can be typed there.
+    let spaceTogglesPause: Bool
     let programmes: (now: Programme?, next: Programme?)
     let isFavourite: Bool
     let toggleFavourite: () -> Void
@@ -400,7 +502,7 @@ private struct PlayerPane: View {
                 Image(systemName: player.isPaused ? "play.fill" : "pause.fill")
                     .frame(width: 20)
             }
-            .keyboardShortcut(.space, modifiers: [])
+            .keyboardShortcut(spaceTogglesPause ? KeyboardShortcut(.space, modifiers: []) : nil)
             .disabled(channel == nil)
 
             VStack(alignment: .leading, spacing: 1) {

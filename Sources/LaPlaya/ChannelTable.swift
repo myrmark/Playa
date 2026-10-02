@@ -16,6 +16,8 @@ struct ChannelTable: NSViewRepresentable {
     let toggleFavourite: (Channel) -> Void
     /// Second line of a row: what the channel is showing now, if known.
     let subtitle: (Channel) -> String?
+    /// First line of a row. Episodes show "E03 · Title" instead of the raw playlist name.
+    var title: (Channel) -> String = { $0.name }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(selection: $selection, toggleFavourite: toggleFavourite)
@@ -49,6 +51,7 @@ struct ChannelTable: NSViewRepresentable {
         coordinator.selection = $selection
         coordinator.toggleFavourite = toggleFavourite
         coordinator.subtitle = subtitle
+        coordinator.title = title
         let favouritesChanged = coordinator.favourites != favourites || coordinator.guideStamp != guideStamp
         coordinator.favourites = favourites
         coordinator.guideStamp = guideStamp
@@ -72,6 +75,7 @@ struct ChannelTable: NSViewRepresentable {
         var toggleFavourite: (Channel) -> Void
         var favourites: Set<String> = []
         var subtitle: (Channel) -> String? = { _ in nil }
+        var title: (Channel) -> String = { $0.name }
         var guideStamp = 0
         var channels: [Channel] = []
         var generation = -1
@@ -137,7 +141,8 @@ struct ChannelTable: NSViewRepresentable {
             let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? ChannelCellView
                 ?? ChannelCellView(identifier: identifier)
             let channel = channels[row]
-            cell.configure(with: channel, isFavourite: favourites.contains(channel.url), subtitle: subtitle(channel))
+            cell.configure(with: channel, title: title(channel), isFavourite: favourites.contains(channel.url), subtitle: subtitle(channel))
+            cell.onToggleFavourite = { [weak self] in self?.toggleFavourite(channel) }
             return cell
         }
 
@@ -156,7 +161,9 @@ private final class ChannelCellView: NSTableCellView {
     private let logoView = NSImageView()
     private let nameField = NSTextField(labelWithString: "")
     private let subtitleField = NSTextField(labelWithString: "")
-    private let starView = NSImageView(image: NSImage(systemSymbolName: "star.fill", accessibilityDescription: "Favourite")!)
+    private let starView = NSButton()
+    /// Called when the row's star is clicked.
+    var onToggleFavourite: (() -> Void)?
     private var logoTask: URLSessionDataTask?
 
     init(identifier: NSUserInterfaceItemIdentifier) {
@@ -168,8 +175,11 @@ private final class ChannelCellView: NSTableCellView {
         nameField.lineBreakMode = .byTruncatingTail
         nameField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        starView.contentTintColor = .systemYellow
-        starView.symbolConfiguration = .init(pointSize: 10, weight: .regular)
+        starView.isBordered = false
+        starView.imagePosition = .imageOnly
+        starView.symbolConfiguration = .init(pointSize: 12, weight: .regular)
+        starView.target = self
+        starView.action = #selector(starClicked)
         subtitleField.lineBreakMode = .byTruncatingTail
         subtitleField.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         subtitleField.textColor = .secondaryLabelColor
@@ -194,7 +204,8 @@ private final class ChannelCellView: NSTableCellView {
             textStack.trailingAnchor.constraint(equalTo: starView.leadingAnchor, constant: -6),
             starView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
             starView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            starView.widthAnchor.constraint(equalToConstant: 14),
+            starView.widthAnchor.constraint(equalToConstant: 22),
+            starView.heightAnchor.constraint(equalToConstant: 22),
             textStack.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
     }
@@ -203,11 +214,20 @@ private final class ChannelCellView: NSTableCellView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func configure(with channel: Channel, isFavourite: Bool, subtitle: String?) {
-        nameField.stringValue = channel.name
+    @objc private func starClicked() {
+        onToggleFavourite?()
+    }
+
+    func configure(with channel: Channel, title: String, isFavourite: Bool, subtitle: String?) {
+        nameField.stringValue = title
         subtitleField.stringValue = subtitle ?? ""
         subtitleField.isHidden = subtitle == nil
-        starView.isHidden = !isFavourite
+        starView.image = NSImage(
+            systemSymbolName: isFavourite ? "star.fill" : "star",
+            accessibilityDescription: isFavourite ? "Remove from Favourites" : "Add to Favourites"
+        )
+        starView.contentTintColor = isFavourite ? .systemYellow : .tertiaryLabelColor
+        starView.toolTip = isFavourite ? "Remove from Favourites" : "Add to Favourites"
         logoTask?.cancel()
         logoTask = nil
         logoView.image = Self.placeholder
