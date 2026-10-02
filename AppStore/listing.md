@@ -47,7 +47,7 @@ SYNC AND PRIVACY
 • No accounts, no ads, no tracking
 • One purchase covers both Mac and Apple TV
 
-Screenshots show Big Buck Bunny and Sintel, © Blender Foundation, licensed under CC BY 3.0.
+Screenshots show Big Buck Bunny (© copyright 2008, Blender Foundation / www.bigbuckbunny.org) and Sintel (© copyright Blender Foundation / durian.blender.org), both licensed under Creative Commons Attribution 3.0.
 
 ## Keywords (100 characters max)
 iptv,m3u,player,tv,guide,epg,xtream,playlist,live,stream,channels,series,films
@@ -78,5 +78,7 @@ On Apple TV: the app opens on the Add Playlist screen. Enter the address above a
 On the Mac: click + in the toolbar, paste the address and click Add. Click a channel in the sidebar, then press the Play button.
 
 The demo playlist has no TV guide, so guide features show "no programme information" with it.
+
+The films visible in the screenshots are Big Buck Bunny and Sintel, open films by the Blender Foundation under the Creative Commons Attribution 3.0 licence, credited in the description.
 
 The source code is public at https://github.com/myrmark/Playa. Playback uses mpv and FFmpeg under the LGPL through the MPVKit package.
