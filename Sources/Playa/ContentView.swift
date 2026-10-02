@@ -42,6 +42,7 @@ struct ContentView: View {
                 channel: selectedChannel,
                 resume: resume,
                 playlistError: store.errorMessage,
+                zap: zap,
                 spaceTogglesPause: !isSearching,
                 programmes: epg.guide.nowAndNext(channelID: selectedChannel?.tvgID, at: now),
                 isFavourite: selectedChannel.map { store.favourites.contains($0.url) } ?? false,
@@ -142,6 +143,14 @@ struct ContentView: View {
         .onChange(of: selectedChannel) { _, channel in
             if let channel { store.lastChannelURL = channel.url }
         }
+    }
+
+    /// Moves to the channel above (-1) or below (+1) the current one in the sidebar list.
+    private func zap(_ offset: Int) {
+        guard let current = selectedChannel, let index = visibleChannels.firstIndex(of: current),
+              visibleChannels.indices.contains(index + offset)
+        else { return }
+        selectedChannel = visibleChannels[index + offset]
     }
 
     /// The guide opens on what the sidebar is showing, or on favourites when it shows everything.
@@ -414,6 +423,7 @@ private struct PlayerPane: View {
     let channel: Channel?
     let resume: ResumeStore
     let playlistError: String?
+    let zap: (Int) -> Void
     /// Off while the search field has focus, so a space can be typed there.
     let spaceTogglesPause: Bool
     let programmes: (now: Programme?, next: Programme?)
@@ -440,6 +450,14 @@ private struct PlayerPane: View {
                     .padding()
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
                     .padding()
+            } else if player.isReconnecting {
+                VStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.large)
+                    Text("Reconnecting…")
+                }
+                .padding(18)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
             } else if player.isBuffering {
                 ProgressView()
                     .controlSize(.large)
@@ -452,7 +470,9 @@ private struct PlayerPane: View {
         .onChange(of: channel?.url, initial: true) { _, _ in
             savePosition(isFinal: true)
             playing = channel
-            if let channel { player.play(url: channel.url, startAt: resume.resumePosition(for: channel)) }
+            if let channel {
+                player.play(url: channel.url, startAt: resume.resumePosition(for: channel), isLive: channel.kind == .live)
+            }
         }
         .onChange(of: player.position) { _, position in
             if Int(position) % 10 == 0, position > 0 { savePosition(isFinal: false) }
@@ -516,6 +536,41 @@ private struct PlayerPane: View {
         .background(.bar)
     }
 
+    /// Audio and subtitle choices, shown only when the stream offers any.
+    @ViewBuilder
+    private var trackMenu: some View {
+        let audio = player.tracks.filter { $0.kind == .audio }
+        let subtitles = player.tracks.filter { $0.kind == .subtitle }
+        if audio.count > 1 || !subtitles.isEmpty {
+            Menu {
+                if audio.count > 1 {
+                    Section("Audio") {
+                        ForEach(audio) { track in
+                            Toggle(track.label, isOn: Binding(get: { track.isSelected }, set: { _ in player.selectAudio(track) }))
+                        }
+                    }
+                }
+                if !subtitles.isEmpty {
+                    Section("Subtitles") {
+                        Toggle("Off", isOn: Binding(
+                            get: { !subtitles.contains(where: \.isSelected) },
+                            set: { _ in player.selectSubtitle(nil) }
+                        ))
+                        ForEach(subtitles) { track in
+                            Toggle(track.label, isOn: Binding(get: { track.isSelected }, set: { _ in player.selectSubtitle(track) }))
+                        }
+                    }
+                }
+            } label: {
+                Image(systemName: "captions.bubble")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Audio and subtitles")
+        }
+    }
+
     private var controlRow: some View {
         HStack(spacing: 14) {
             Button {
@@ -534,6 +589,23 @@ private struct PlayerPane: View {
                     Image(systemName: "backward.end.fill")
                 }
                 .help("Start from the beginning")
+            } else {
+                Button {
+                    zap(-1)
+                } label: {
+                    Image(systemName: "chevron.up")
+                }
+                .keyboardShortcut(.upArrow, modifiers: .command)
+                .help("Previous channel (⌘↑)")
+                .disabled(channel == nil)
+                Button {
+                    zap(1)
+                } label: {
+                    Image(systemName: "chevron.down")
+                }
+                .keyboardShortcut(.downArrow, modifiers: .command)
+                .help("Next channel (⌘↓)")
+                .disabled(channel == nil)
             }
 
             VStack(alignment: .leading, spacing: 1) {
@@ -555,6 +627,7 @@ private struct PlayerPane: View {
             .disabled(channel == nil)
             Spacer()
 
+            trackMenu
             Image(systemName: "speaker.wave.2.fill")
                 .foregroundStyle(.secondary)
             Slider(value: $player.volume, in: 0...100)
