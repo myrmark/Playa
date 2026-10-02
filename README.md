@@ -17,7 +17,7 @@ Playa is being prepared for the App Store, as one purchase covering Mac and Appl
 - **TV guide**: now/next on every channel with programme descriptions, plus a full-window schedule grid. The guide is read from the playlist's XMLTV address, or found automatically for Xtream-style `get.php` playlists.
 - **Favourites and lists**: star channels, films and shows, or collect them in your own named lists and arrange them in any order. A Recently Watched list keeps itself.
 - **Hide groups** you never use, so a provider's hundreds of groups shrink to the ones you care about.
-- **Search** across channels, films and shows.
+- **Search** across channels, films and shows, and through the TV guide: type a programme's name to find which channel is showing it, now or later.
 - **Plays almost anything**: playback uses [mpv](https://mpv.io), with hardware decoding and Metal rendering.
 - **Built for big playlists**: tested with a playlist of about 290,000 entries.
 

@@ -70,6 +70,8 @@ struct ContentView: View {
     @State private var visibleChannels: [Channel] = []
     @State private var listGeneration = 0
     @State private var filterTask: Task<Void, Never>?
+    /// For channels a search found through the guide: the matching programme, by channel id.
+    @State private var programmeMatches: [Int: String] = [:]
     @State private var visibleShows: [SeriesShow] = []
     /// The show whose episodes the Series section is showing, if any.
     @State private var openShow: SeriesShow?
@@ -120,7 +122,7 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             sidebar
-                .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 420)
+                .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 720)
         } detail: {
             // The player lives in its own view so that playback state changes
             // don't re-render the (potentially huge) channel list.
@@ -338,16 +340,37 @@ struct ContentView: View {
                 try? await Task.sleep(for: .milliseconds(150))
                 if Task.isCancelled { return }
             }
-            let result = await Task.detached(priority: .userInitiated) {
-                Self.visibleItems(
+            // In Live TV a search also looks through the guide, so a programme can be found
+            // without knowing which channel shows it.
+            let guide = section == .live && searchText.count >= 3 ? epg.guide : Guide()
+            let result = await Task.detached(priority: .userInitiated) { () -> (channels: [Channel], shows: [SeriesShow], labels: [Int: String]) in
+                var items = Self.visibleItems(
                     in: playlist, section: section, filter: filter, searchText: searchText,
                     favourites: favourites, ordered: ordered, hiddenGroups: hiddenGroups
                 )
+                guard !guide.isEmpty else { return (items.channels, items.shows, [:]) }
+                let now = Date()
+                let members = Set(ordered ?? [])
+                let alreadyListed = Set(items.channels.map(\.id))
+                var labels: [Int: String] = [:]
+                for hit in guide.channels(showing: searchText, in: playlist, from: now, hiddenGroups: hiddenGroups) {
+                    switch filter {
+                    case .all: break
+                    case .favourites: guard favourites.contains(hit.channel.key) else { continue }
+                    case .list, .recent: guard members.contains(hit.channel.key) else { continue }
+                    case .group(let group): guard hit.channel.group == group else { continue }
+                    }
+                    labels[hit.channel.id] = hit.programme.searchLabel(at: now)
+                    // Channels found by name come first; these follow, soonest programme first.
+                    if !alreadyListed.contains(hit.channel.id) { items.channels.append(hit.channel) }
+                }
+                return (items.channels, items.shows, labels)
             }.value
             if Task.isCancelled { return }
             listGeneration += 1
             visibleChannels = result.channels
             visibleShows = result.shows
+            programmeMatches = result.labels
         }
     }
 
@@ -639,8 +662,9 @@ struct ContentView: View {
                         guideStamp: epg.version &* 1_000_000 &+ Int(now.timeIntervalSince1970 / 60) % 1_000_000 &+ resume.version,
                         selection: $selectedChannel,
                         toggleFavourite: store.toggleFavourite,
-                        subtitle: { [guide = epg.guide, now] channel in
-                            channel.kind == .live
+                        subtitle: { [guide = epg.guide, now, programmeMatches] channel in
+                            if let match = programmeMatches[channel.id] { return match }
+                            return channel.kind == .live
                                 ? guide.nowAndNext(channelID: channel.tvgID, at: now).now?.title
                                 : resume.label(for: channel)
                         },
@@ -708,7 +732,7 @@ extension ChannelKind {
 
     var searchPrompt: String {
         switch self {
-        case .live: "Search channels"
+        case .live: "Search channels and programmes"
         case .movie: "Search films"
         case .series: "Search series"
         }

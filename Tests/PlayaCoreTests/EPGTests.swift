@@ -53,6 +53,45 @@ final class EPGTests: XCTestCase {
         XCTAssertNil(guide.nowAndNext(channelID: nil, at: now).now)
     }
 
+    func testSearchesProgrammes() {
+        func date(_ text: String) -> Date { ISO8601DateFormatter().date(from: text)! }
+        let now = date("2026-10-02T18:30:00Z")
+        let guide = Guide(programmes: [
+            "sport1": [
+                Programme(start: date("2026-10-02T18:00:00Z"), stop: date("2026-10-02T19:00:00Z"), title: "Studio"),
+                Programme(start: date("2026-10-02T19:00:00Z"), stop: date("2026-10-02T21:00:00Z"), title: "Fotboll", description: "Nations League: Sverige–Norge"),
+            ],
+            "sport2": [
+                Programme(start: date("2026-10-02T18:00:00Z"), stop: date("2026-10-02T20:00:00Z"), title: "UEFA Nations League"),
+            ],
+            "news": [
+                Programme(start: date("2026-10-02T17:00:00Z"), stop: date("2026-10-02T18:00:00Z"), title: "Nations League igår"),
+                Programme(start: date("2026-10-05T18:00:00Z"), stop: date("2026-10-05T19:00:00Z"), title: "Nations League senare"),
+            ],
+        ])
+        let hits = guide.search("nations league", from: now, horizon: 36 * 3600)
+        XCTAssertEqual(hits["sport1"]?.title, "Fotboll", "matched through its description")
+        XCTAssertEqual(hits["sport2"]?.title, "UEFA Nations League")
+        XCTAssertNil(hits["news"], "one is over and the other is beyond the horizon")
+
+        func channel(_ id: Int, _ name: String, _ tvg: String?, group: String = "Sport", kind: ChannelKind = .live) -> Channel {
+            Channel(id: id, name: name, url: "http://h/u/p/\(id)", group: group, logo: nil, tvgID: tvg, kind: kind)
+        }
+        var playlist = Playlist()
+        playlist.channels = [
+            channel(0, "Sport 1 HD", "SPORT1"), channel(1, "Sport 2 HD", "sport2"), channel(2, "Sport 2 FHD", "sport2"),
+            channel(3, "No guide", nil), channel(4, "Hidden", "sport2", group: "Adult"), channel(5, "A film", "sport2", kind: .movie),
+        ]
+        let found = guide.channels(showing: "Nations League", in: playlist, from: now, hiddenGroups: ["Adult"])
+        XCTAssertEqual(found.map(\.channel.name), ["Sport 2 HD", "Sport 2 FHD", "Sport 1 HD"], "on now first, then later")
+
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        XCTAssertTrue(found[0].programme.searchLabel(at: now, calendar: utc).hasPrefix("Now · "))
+        XCTAssertTrue(found[2].programme.searchLabel(at: now, calendar: utc).hasSuffix(" · Fotboll"))
+        XCTAssertFalse(found[2].programme.searchLabel(at: now, calendar: utc).hasPrefix("Now"))
+    }
+
     func testLocatesGuideURL() {
         XCTAssertEqual(
             EPGLocator.guideURL(playlistURL: "http://host:8080/get.php?username=u&password=p&type=m3u_plus&output=ts", advertised: nil)?.absoluteString,

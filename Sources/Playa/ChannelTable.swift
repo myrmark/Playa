@@ -221,9 +221,35 @@ struct ChannelTable: NSViewRepresentable {
             let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? ChannelCellView
                 ?? ChannelCellView(identifier: identifier)
             let channel = channels[row]
-            cell.configure(with: channel, title: title(channel), isFavourite: favourites.contains(channel.key), subtitle: subtitle(channel))
+            cell.configure(
+                with: channel, title: title(channel), isFavourite: favourites.contains(channel.key),
+                subtitle: subtitle(channel), textWidth: textWidth(in: tableView)
+            )
             cell.onToggleFavourite = { [weak self] in self?.toggleFavourite(channel) }
             return cell
+        }
+
+        private func textWidth(in tableView: NSTableView) -> CGFloat {
+            max((tableView.tableColumns.first?.width ?? tableView.bounds.width) - ChannelCellView.nonTextWidth, 60)
+        }
+
+        /// Rows grow by a line when the channel's name needs two.
+        func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+            guard channels.indices.contains(row) else { return 38 }
+            return ChannelCellView.lines(for: title(channels[row]), textWidth: textWidth(in: tableView)) == 2 ? 54 : 38
+        }
+
+        /// Widening or narrowing the sidebar changes which names fit on one line.
+        func tableViewColumnDidResize(_ notification: Notification) {
+            guard let tableView, !channels.isEmpty else { return }
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0
+                tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<channels.count))
+            }
+            let visible = tableView.rows(in: tableView.visibleRect)
+            if let rows = Range(visible) {
+                tableView.reloadData(forRowIndexes: IndexSet(integersIn: rows), columnIndexes: [0])
+            }
         }
 
         func tableViewSelectionDidChange(_ notification: Notification) {
@@ -236,7 +262,7 @@ struct ChannelTable: NSViewRepresentable {
     }
 }
 
-private final class ChannelCellView: NSTableCellView {
+final class ChannelCellView: NSTableCellView {
     private static let placeholder = NSImage(systemSymbolName: "tv", accessibilityDescription: nil)
     private static let cache = NSCache<NSString, NSImage>()
 
@@ -254,7 +280,11 @@ private final class ChannelCellView: NSTableCellView {
 
         logoView.imageScaling = .scaleProportionallyUpOrDown
         logoView.contentTintColor = .tertiaryLabelColor
-        nameField.lineBreakMode = .byTruncatingTail
+        // Long names wrap onto a second line before they are cut off.
+        nameField.maximumNumberOfLines = 2
+        nameField.lineBreakMode = .byWordWrapping
+        nameField.cell?.wraps = true
+        nameField.cell?.truncatesLastVisibleLine = true
         nameField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         starView.isBordered = false
@@ -300,7 +330,20 @@ private final class ChannelCellView: NSTableCellView {
         onToggleFavourite?()
     }
 
-    func configure(with channel: Channel, title: String, isFavourite: Bool, subtitle: String?) {
+    /// Room the logo, the star and the row's margins take from the text.
+    static let nonTextWidth: CGFloat = 78
+
+    /// How many lines `title` needs in a row whose text area is `textWidth` wide. This is an
+    /// estimate from the character count: measuring every name in a provider-sized list each
+    /// time it is filtered would make the list stutter.
+    static func lines(for title: String, textWidth: CGFloat) -> Int {
+        let charactersPerLine = max(Int(textWidth / 7.2), 8)
+        return title.count > charactersPerLine ? 2 : 1
+    }
+
+    func configure(with channel: Channel, title: String, isFavourite: Bool, subtitle: String?, textWidth: CGFloat) {
+        // A wrapping label needs to be told how wide it may get before it works out its height.
+        nameField.preferredMaxLayoutWidth = textWidth
         nameField.stringValue = title
         subtitleField.stringValue = subtitle ?? ""
         subtitleField.isHidden = subtitle == nil

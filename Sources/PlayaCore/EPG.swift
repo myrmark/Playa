@@ -15,6 +15,17 @@ public struct Programme: Hashable, Sendable {
     }
 }
 
+extension Programme {
+    /// How a search result describes this programme: "Now · Title", "20:45 · Title" for later
+    /// today, or "Sat 20:45 · Title" for another day.
+    public func searchLabel(at date: Date, calendar: Calendar = .current) -> String {
+        if start <= date { return "Now · \(title)" }
+        let time = start.formatted(date: .omitted, time: .shortened)
+        if calendar.isDate(start, inSameDayAs: date) { return "\(time) · \(title)" }
+        return "\(start.formatted(.dateTime.weekday(.abbreviated))) \(time) · \(title)"
+    }
+}
+
 public struct Guide: Sendable {
     /// Programmes per lowercased XMLTV channel id, sorted by start time.
     public private(set) var programmes: [String: [Programme]]
@@ -37,6 +48,39 @@ public struct Guide: Sendable {
         var upper = low
         while upper < list.count, list[upper].start < end { upper += 1 }
         return list[low..<upper]
+    }
+
+    /// For each channel, the first programme that is on at `date` or starts within `horizon`
+    /// after it and mentions `query` in its title or description.
+    public func search(_ query: String, from date: Date, horizon: TimeInterval) -> [String: Programme] {
+        let end = date.addingTimeInterval(horizon)
+        var hits: [String: Programme] = [:]
+        for (channelID, _) in programmes {
+            let match = programmes(channelID: channelID, from: date, to: end).first { programme in
+                programme.title.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+                    || programme.description?.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+            }
+            if let match { hits[channelID] = match }
+        }
+        return hits
+    }
+
+    /// The live channels showing a programme that matches `query`, soonest first: what is on
+    /// now, then what starts later. Channels in `hiddenGroups` are left out.
+    public func channels(
+        showing query: String, in playlist: Playlist, from date: Date, horizon: TimeInterval = 36 * 3600,
+        hiddenGroups: Set<String> = []
+    ) -> [(channel: Channel, programme: Programme)] {
+        let hits = search(query, from: date, horizon: horizon)
+        guard !hits.isEmpty else { return [] }
+        var found: [(channel: Channel, programme: Programme)] = []
+        for channel in playlist.channels where channel.kind == .live && !hiddenGroups.contains(channel.group) {
+            if let id = channel.tvgID, let programme = hits[id.lowercased()] {
+                found.append((channel, programme))
+            }
+        }
+        // Programmes already running sort by their start too, which puts them ahead of later ones.
+        return found.sorted { ($0.programme.start, $0.channel.id) < ($1.programme.start, $1.channel.id) }
     }
 
     public func nowAndNext(channelID: String?, at date: Date) -> (now: Programme?, next: Programme?) {

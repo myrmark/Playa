@@ -29,6 +29,7 @@ LIVE TV, FILMS AND SERIES
 TV GUIDE
 • Now and next on every channel, with programme descriptions
 • A timeline guide for any group or list
+• Search the guide to find which channel is showing a programme
 • Reads the guide address from your playlist, and finds it automatically for common provider formats
 
 MAKE IT YOURS

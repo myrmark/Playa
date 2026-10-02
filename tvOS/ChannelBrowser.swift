@@ -505,6 +505,8 @@ struct ChannelPane: View {
 struct ChannelRow: View {
     let channel: Channel
     var title: String?
+    /// Shown in place of the usual second line, for a programme a search found.
+    var subtitleOverride: String?
     let now: Date
     /// Extra context-menu entries, after the favourites and list ones.
     var extraMenu: AnyView?
@@ -515,7 +517,8 @@ struct ChannelRow: View {
     @EnvironmentObject private var resume: ResumeStore
 
     private var subtitle: String? {
-        channel.kind == .live
+        if let subtitleOverride { return subtitleOverride }
+        return channel.kind == .live
             ? epg.guide.nowAndNext(channelID: channel.tvgID, at: now).now?.title
             : resume.label(for: channel)
     }

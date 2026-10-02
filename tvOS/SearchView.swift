@@ -3,7 +3,10 @@ import SwiftUI
 
 struct SearchView: View {
     @EnvironmentObject private var store: PlaylistStore
+    @EnvironmentObject private var epg: EPGStore
     @State private var text = ""
+    /// Channels showing a programme that matches, now or in the next day and a half.
+    @State private var programmes: [(channel: Channel, label: String)] = []
     @State private var channels: [Channel] = []
     @State private var shows: [SeriesShow] = []
     @State private var session: PlayerSession?
@@ -23,6 +26,15 @@ struct SearchView: View {
                         }
                     }
                 }
+                if !programmes.isEmpty {
+                    Section("On TV") {
+                        ForEach(programmes, id: \.channel.id) { hit in
+                            ChannelRow(channel: hit.channel, subtitleOverride: hit.label, now: Date()) {
+                                session = PlayerSession(channels: [hit.channel], index: 0)
+                            }
+                        }
+                    }
+                }
                 if !shows.isEmpty {
                     Section("Series") {
                         ForEach(shows) { show in
@@ -31,7 +43,7 @@ struct SearchView: View {
                     }
                 }
             }
-            .searchable(text: $text, prompt: "Channels, films and series")
+            .searchable(text: $text, prompt: "Channels, programmes, films and series")
             .navigationDestination(for: SeriesShow.self) { show in
                 EpisodeList(show: show)
             }
@@ -47,12 +59,21 @@ struct SearchView: View {
         guard query.count >= 2 else {
             channels = []
             shows = []
+            programmes = []
             return
         }
         // Wait for a pause in typing.
         try? await Task.sleep(for: .milliseconds(300))
         if Task.isCancelled { return }
         let playlist = store.playlist, limit = Self.limit, hidden = store.hiddenGroups
+        // Searching the guide takes at least three letters, to keep one-word noise out.
+        let guide = query.count >= 3 ? epg.guide : Guide()
+        let hiddenLive = Set(hidden.compactMap { $0.hasPrefix("live/") ? String($0.dropFirst(5)) : nil })
+        let found = await Task.detached(priority: .userInitiated) { () -> [(channel: Channel, label: String)] in
+            let now = Date()
+            return guide.channels(showing: query, in: playlist, from: now, hiddenGroups: hiddenLive)
+                .prefix(limit).map { ($0.channel, $0.programme.searchLabel(at: now)) }
+        }.value
         let result = await Task.detached(priority: .userInitiated) { () -> ([Channel], [SeriesShow]) in
             func matches(_ name: String) -> Bool {
                 name.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil
@@ -71,5 +92,6 @@ struct SearchView: View {
         if Task.isCancelled { return }
         channels = result.0
         shows = result.1
+        programmes = found
     }
 }
