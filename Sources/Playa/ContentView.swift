@@ -140,7 +140,8 @@ struct ContentView: View {
                     store.noteWatched([channel.key] + (show.map { [$0.favouriteKey] } ?? []))
                 },
                 zap: zap,
-                spaceTogglesPause: !isSearching,
+                // The guide has a search field of its own, where these keys must type.
+                spaceTogglesPause: !isSearching && !showingGuide,
                 programmes: epg.guide.nowAndNext(channelID: selectedChannel?.tvgID, at: now),
                 isFavourite: selectedChannel.map { store.favourites.contains($0.key) } ?? false,
                 toggleFavourite: { if let selectedChannel { store.toggleFavourite(selectedChannel) } }

@@ -20,6 +20,15 @@ struct GuideView: View {
     @State private var windowStart: Date
     @State private var rows: [Channel] = []
     @State private var rowGeneration = 0
+    @State private var searchText = ""
+    /// While searching: the first matching programme per guide channel id, from now on.
+    @State private var searchHits: [String: Programme] = [:]
+
+    /// Searching takes at least three letters, as it does in the sidebar.
+    private var query: String {
+        let trimmed = searchText.trimmingCharacters(in: .whitespaces)
+        return trimmed.count >= 3 ? trimmed : ""
+    }
 
     static let channelColumnWidth: CGFloat = 220
     private static let windowLength: TimeInterval = 4 * 3600
@@ -64,11 +73,14 @@ struct GuideView: View {
                 windowEnd: windowEnd,
                 now: now,
                 playingURL: playingChannel?.url,
+                highlight: query,
                 stamp: rowGeneration &* 1_000_003 &+ Int(windowStart.timeIntervalSince1970 / 60) &+ Int(now.timeIntervalSince1970 / 60),
                 onPlay: onPlay
             )
             .overlay {
-                if rows.isEmpty {
+                if rows.isEmpty, !query.isEmpty {
+                    ContentUnavailableView.search(text: query)
+                } else if rows.isEmpty {
                     ContentUnavailableView(
                         "No channels to show",
                         systemImage: "calendar",
@@ -83,6 +95,33 @@ struct GuideView: View {
         .onAppear(perform: updateRows)
         .onChange(of: filter) { updateRows() }
         .onChange(of: onlyWithProgrammes) { updateRows() }
+        .task(id: query) { await search() }
+    }
+
+    /// Finds the channels showing a matching programme in the next day and a half, lists
+    /// them soonest first, and moves the timeline to the first one if it is out of view.
+    private func search() async {
+        let query = query, guide = guide, now = now
+        guard !query.isEmpty else {
+            if !searchHits.isEmpty {
+                searchHits = [:]
+                updateRows()
+            }
+            return
+        }
+        // Wait for a pause in typing.
+        try? await Task.sleep(for: .milliseconds(250))
+        if Task.isCancelled { return }
+        let hits = await Task.detached(priority: .userInitiated) {
+            guide.search(query, from: now, horizon: 36 * 3600)
+        }.value
+        if Task.isCancelled { return }
+        searchHits = hits
+        updateRows()
+        let starts = rows.compactMap { $0.tvgID.flatMap { hits[$0.lowercased()] }?.start }
+        if let first = starts.min(), first >= windowEnd || first < windowStart {
+            windowStart = max(Self.currentWindowStart(for: first), Self.currentWindowStart(for: now))
+        }
     }
 
     private func updateRows() {
@@ -102,7 +141,21 @@ struct GuideView: View {
             if onlyWithProgrammes {
                 guard let id = channel.tvgID, guide.programmes[id.lowercased()] != nil else { return false }
             }
+            if !query.isEmpty {
+                let showsMatch = channel.tvgID.map { searchHits[$0.lowercased()] != nil } ?? false
+                let nameMatches = channel.name.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+                guard showsMatch || nameMatches else { return false }
+            }
             return true
+        }
+        if !query.isEmpty {
+            // Soonest matching programme first; channels matched only by name go last.
+            func start(_ channel: Channel) -> Date {
+                channel.tvgID.flatMap { searchHits[$0.lowercased()] }?.start ?? .distantFuture
+            }
+            rows = rows.enumerated().sorted { (start($0.element), $0.offset) < (start($1.element), $1.offset) }.map(\.element)
+            rowGeneration += 1
+            return
         }
         if let ordered {
             let position = Dictionary(ordered.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
@@ -130,6 +183,26 @@ struct GuideView: View {
             .labelsHidden()
             .frame(maxWidth: 260)
             Toggle("Only channels with a schedule", isOn: $onlyWithProgrammes)
+            HStack(spacing: 5) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Search programmes", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .onExitCommand { searchText = "" }
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+            .frame(width: 220)
 
             Spacer()
 
@@ -182,6 +255,8 @@ private struct GuideTable: NSViewRepresentable {
     let windowEnd: Date
     let now: Date
     let playingURL: String?
+    /// Programmes mentioning this are outlined; empty for none.
+    let highlight: String
     /// Changes whenever anything the rows draw has changed.
     let stamp: Int
     let onPlay: (Channel) -> Void
@@ -219,7 +294,7 @@ private struct GuideTable: NSViewRepresentable {
         let coordinator = context.coordinator
         let previous = coordinator.parent
         coordinator.parent = self
-        if previous.stamp != stamp || previous.playingURL != playingURL || coordinator.needsInitialLoad {
+        if previous.stamp != stamp || previous.playingURL != playingURL || previous.highlight != highlight || coordinator.needsInitialLoad {
             coordinator.needsInitialLoad = false
             coordinator.tableView?.reloadData()
         }
@@ -252,7 +327,8 @@ private struct GuideTable: NSViewRepresentable {
                 windowStart: parent.windowStart,
                 windowEnd: parent.windowEnd,
                 now: parent.now,
-                isPlaying: channel.url == parent.playingURL
+                isPlaying: channel.url == parent.playingURL,
+                highlight: parent.highlight
             )
             return view
         }
@@ -272,10 +348,21 @@ private final class GuideRowView: NSView {
     private var windowEnd = Date()
     private var now = Date()
     private var isPlaying = false
+    private var highlight = ""
+
+    private func isHighlighted(_ programme: Programme) -> Bool {
+        guard !highlight.isEmpty else { return false }
+        return programme.title.range(of: highlight, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+            || programme.description?.range(of: highlight, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+    }
 
     override var isFlipped: Bool { true }
 
-    func configure(name: String, programmes: ArraySlice<Programme>, windowStart: Date, windowEnd: Date, now: Date, isPlaying: Bool) {
+    func configure(
+        name: String, programmes: ArraySlice<Programme>, windowStart: Date, windowEnd: Date, now: Date, isPlaying: Bool,
+        highlight: String
+    ) {
+        self.highlight = highlight
         self.name = name
         self.programmes = programmes
         self.windowStart = windowStart
@@ -360,6 +447,13 @@ private final class GuideRowView: NSView {
             let isOnNow = programme.start <= now && now < programme.stop
             (isOnNow ? NSColor.controlAccentColor.withAlphaComponent(0.28) : NSColor.labelColor.withAlphaComponent(0.07)).setFill()
             NSBezierPath(roundedRect: block, xRadius: 5, yRadius: 5).fill()
+            if isHighlighted(programme) {
+                // What the search found stands out with an outline.
+                NSColor.systemYellow.setStroke()
+                let outline = NSBezierPath(roundedRect: block.insetBy(dx: 1, dy: 1), xRadius: 4, yRadius: 4)
+                outline.lineWidth = 2
+                outline.stroke()
+            }
 
             let text = block.insetBy(dx: 7, dy: 0)
             guard text.width > 14 else { continue }
