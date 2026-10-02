@@ -37,7 +37,7 @@ This builds `Playa.app` in the repository folder and launches it. The first buil
 
 ## Apple TV
 
-There is an early Apple TV version in `tvOS/`. It shares the playlist, guide, series and player code with the Mac app and has its own interface for the remote: Live TV, Films, Series, Search and Settings.
+There is an early Apple TV version in `tvOS/`. It shares the playlist, guide, series and player code with the Mac app and has its own interface for the remote: Live TV, Films, Series, a TV guide grid, Search and Settings.
 
 ```sh
 brew install xcodegen

@@ -27,6 +27,7 @@ struct PlayaTVApp: App {
 struct RootView: View {
     @EnvironmentObject private var store: PlaylistStore
     @EnvironmentObject private var epg: EPGStore
+    @State private var tab = ChannelKind.live.rawValue
 
     var body: some View {
         Group {
@@ -35,7 +36,7 @@ struct RootView: View {
                     AddPlaylistView()
                 }
             } else {
-                TabView {
+                TabView(selection: $tab) {
                     ForEach(ChannelKind.allCases.filter { store.playlist.countByKind[$0] != nil || $0 == .live }, id: \.self) { kind in
                         Group {
                             if kind == .series {
@@ -45,11 +46,17 @@ struct RootView: View {
                             }
                         }
                         .tabItem { Text(kind.title) }
+                        .tag(kind.rawValue)
                     }
+                    GuideScreen()
+                        .tabItem { Text("Guide") }
+                        .tag("guide")
                     SearchView()
                         .tabItem { Label("Search", systemImage: "magnifyingglass") }
+                        .tag("search")
                     SettingsView()
                         .tabItem { Label("Settings", systemImage: "gearshape") }
+                        .tag("settings")
                 }
             }
         }
