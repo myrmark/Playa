@@ -92,6 +92,8 @@ struct PlayerScreen: View {
             flashInfo()
         }
         .onMoveCommand { direction in
+            // With a panel open, swipes move between its buttons and mustn't also reach the stream.
+            guard !showsPanel, !showsOptions else { return }
             switch direction {
             // Swiping down brings up the channel list, as select does.
             case .down: withAnimation { showsPanel = true }
