@@ -293,7 +293,13 @@ struct PlayerScreen: View {
     }
 
     private var displayManager: AVDisplayManager? {
-        UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first?.windows.first?.avDisplayManager
+        // The window gains this property only once AVKit is loaded, and nothing else here uses
+        // AVKit, so name one of its classes to make sure it is.
+        _ = AVPlayerViewController.self
+        guard let window = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first?.windows.first,
+              window.responds(to: #selector(getter: UIWindow.avDisplayManager))
+        else { return nil }
+        return window.avDisplayManager
     }
 
     /// Asks the TV to run at the stream's frame rate, so 50 fps channels aren't shown with the
