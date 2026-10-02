@@ -15,9 +15,13 @@ func gradient(_ stops: [(UInt32, CGFloat)]) -> CGGradient {
 }
 
 func draw(_ layer: Layer, width: Int, height: Int) -> Data {
+    // The App Store rejects a background layer with an alpha channel, so the layers that
+    // fill the whole image are written without one.
+    let isOpaque = layer == .back || layer == .flat
     let rep = NSBitmapImageRep(
         bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8,
-        samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        samplesPerPixel: isOpaque ? 3 : 4, hasAlpha: !isOpaque, isPlanar: false, colorSpaceName: .deviceRGB,
+        bytesPerRow: 0, bitsPerPixel: isOpaque ? 32 : 0
     )!
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
     let context = NSGraphicsContext.current!.cgContext
