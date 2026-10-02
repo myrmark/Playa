@@ -49,11 +49,10 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Text(store.playlistSyncWorks ? "On" : "Not available")
+                    Text("Playlists, favourites and resume positions sync with Playa on your other devices signed in to the same Apple Account. Playlist addresses, which include your provider login, are stored in iCloud with Apple's standard encryption.")
+                        .font(.caption)
                 } header: {
                     Text("iCloud sync")
-                } footer: {
-                    Text("Playlists, favourites and resume positions sync with Playa on your other devices signed in to the same Apple Account with iCloud Keychain on.")
                 }
                 .foregroundStyle(.secondary)
 

@@ -22,8 +22,6 @@ final class PlaylistStore: ObservableObject {
     @Published var errorMessage: String?
     /// `Channel.key`s of starred channels and `SeriesShow.favouriteKey`s of starred shows.
     @Published private(set) var favourites: Set<String> = []
-    /// Whether playlists were last seen arriving from, or being accepted by, iCloud.
-    @Published private(set) var playlistSyncWorks = false
 
     /// What is synced between devices. Stamps decide whose copy is newer.
     private struct SyncedFavourites: Codable {
@@ -110,12 +108,12 @@ final class PlaylistStore: ObservableObject {
 
     /// A few counts for `Playa --diagnose`; nothing that identifies a provider.
     var diagnostics: String {
-        let remote = CloudSync.readSecret(SyncedPlaylists.self, account: "playlists")
+        let remote = CloudSync.read(SyncedPlaylists.self, key: Self.savedKey)
         return """
         encryption key available: \(Vault.isAvailable)
         playlists on this device: \(saved.count)
         favourites: \(favourites.count)
-        playlists in iCloud Keychain: \(remote.map { "\($0.playlists.count), last changed \($0.updatedAt.formatted(date: .abbreviated, time: .standard))" } ?? "none readable")
+        playlists in iCloud: \(remote.map { "\($0.playlists.count), last changed \($0.updatedAt.formatted(date: .abbreviated, time: .standard))" } ?? "none readable")
         last started, per iCloud key-value storage: \(CloudSync.lastSeen)
         """
     }
@@ -128,17 +126,16 @@ final class PlaylistStore: ObservableObject {
     private func pushPlaylists() {
         playlistsStamp = Date()
         let items = syncablePlaylists.map { SyncedPlaylists.Item(name: $0.name, url: $0.url) }
-        playlistSyncWorks = CloudSync.writeSecret(SyncedPlaylists(updatedAt: playlistsStamp, playlists: items), account: "playlists")
+        CloudSync.write(SyncedPlaylists(updatedAt: playlistsStamp, playlists: items), key: Self.savedKey)
     }
 
     /// Adopts playlists added or removed on another device. Matching is by address.
     private func pullPlaylists() async {
-        guard let remote = CloudSync.readSecret(SyncedPlaylists.self, account: "playlists") else {
+        guard let remote = CloudSync.read(SyncedPlaylists.self, key: Self.savedKey) else {
             // Nothing in iCloud yet: offer what this device has.
-            if !syncablePlaylists.isEmpty, playlistsStamp.timeIntervalSince1970 == 0 { pushPlaylists() }
+            if !syncablePlaylists.isEmpty { pushPlaylists() }
             return
         }
-        playlistSyncWorks = true
         let neverSynced = playlistsStamp.timeIntervalSince1970 == 0
         guard neverSynced || remote.updatedAt > playlistsStamp else { return }
 
@@ -208,18 +205,15 @@ final class PlaylistStore: ObservableObject {
     /// Shows the cached copy of the active playlist straight away if there is one, otherwise downloads it.
     func loadOnLaunch() async {
         CloudSync.start()
+        CloudSync.removeLegacyKeychainItem()
         pullFavourites()
         subscription = CloudSync.changes.receive(on: DispatchQueue.main).sink { [weak self] _ in
-            MainActor.assumeIsolated { self?.pullFavourites() }
-        }
-        await pullPlaylists()
-        // The Keychain doesn't announce items arriving from other devices, so look now and then.
-        Task {
-            while true {
-                try? await Task.sleep(for: .seconds(90))
-                await pullPlaylists()
+            MainActor.assumeIsolated {
+                self?.pullFavourites()
+                Task { await self?.pullPlaylists() }
             }
         }
+        await pullPlaylists()
         // Seal plain-text caches left by older versions, including playlists that aren't open.
         let files = saved.map { (cacheFile(for: $0.id), legacyCacheFile(for: $0.id)) }
         Task.detached(priority: .utility) {

@@ -56,7 +56,7 @@ Without a `Local.xcconfig`, `./build-app.sh` signs ad-hoc. That is fine for runn
 
 ## Sync between devices
 
-Favourites and resume positions sync through the user's own iCloud account (key-value storage) between Playa on their devices. They are stored as fingerprints of the stream addresses, never the addresses themselves. Playlist addresses are offered to iCloud Keychain; that reaches other Macs but, so far, not Apple TV.
+Playlists, favourites and resume positions sync through the user's own iCloud account (key-value storage) between Playa on their devices; nothing passes through any other server. Favourites and resume positions are stored as fingerprints of the stream addresses, never the addresses themselves. Playlist addresses, which include the provider login, are stored as they are, under Apple's standard iCloud encryption (in transit and at rest, not end to end). Playlists added from a file are not synced.
 
 `Playa.app/Contents/MacOS/Playa --diagnose` prints the storage and sync state.
 
@@ -86,7 +86,7 @@ Auto-play on launch and automatic reconnect can be turned on in **Settings** (‚å
 
 ## Privacy
 
-Playlist addresses usually contain your provider login, and so does every stream address inside the playlist. Playa keeps all of it on your device and encrypts what it stores: the playlist list, the cached playlists, favourites, resume positions and the last channel are sealed with a key held in the Keychain. Playa only contacts the addresses in your playlist.
+Playlist addresses usually contain your provider login, and so does every stream address inside the playlist. On your device, Playa encrypts what it stores: the playlist list, the cached playlists, favourites, resume positions and the last channel are sealed with a key held in the Keychain. Playlist addresses are also kept in your own iCloud account so your other devices get them; see "Sync between devices". Playa only contacts the addresses in your playlist.
 
 ## Project layout
 
