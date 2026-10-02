@@ -25,6 +25,9 @@ struct PlayerScreen: View {
     @State private var showsInfo = true
     @State private var infoToken = 0
     @State private var showsTracks = false
+    /// The channel list drawn over the picture, so the guide can be read without leaving playback.
+    @State private var showsPanel = false
+    @FocusState private var panelFocus: Int?
     @State private var watchTask: Task<Void, Never>?
 
     private var channel: Channel { session.channels[index] }
@@ -51,15 +54,19 @@ struct PlayerScreen: View {
                 ProgressView()
             }
 
-            if showsInfo || player.isPaused {
+            if showsPanel {
+                channelPanel
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+            } else if showsInfo || player.isPaused {
                 infoBar
                     .transition(.opacity)
             }
         }
-        .focusable()
-        // Pressing select opens the audio and subtitle choices when the stream has any.
+        // While the panel is open its rows take the remote; otherwise the picture does.
+        .focusable(!showsPanel)
+        // Pressing select brings up the channel list over the picture, which keeps playing.
         .onTapGesture {
-            if hasTrackChoices { showsTracks = true } else { flashInfo() }
+            withAnimation { showsPanel = true }
         }
         .sheet(isPresented: $showsTracks) { trackList }
         .onPlayPauseCommand {
@@ -87,6 +94,54 @@ struct PlayerScreen: View {
         }
         .onChange(of: player.position) { _, position in
             if Int(position) % 10 == 0, position > 0 { savePosition(isFinal: false) }
+        }
+    }
+
+    /// The channels of the list being watched, with what each is showing, over the left of the
+    /// picture. Choosing one switches to it; the back button just closes the panel.
+    private var channelPanel: some View {
+        HStack(spacing: 0) {
+            ScrollViewReader { proxy in
+                List {
+                    if hasTrackChoices {
+                        Button {
+                            showsPanel = false
+                            showsTracks = true
+                        } label: {
+                            Label("Audio and subtitles", systemImage: "captions.bubble")
+                        }
+                    }
+                    ForEach(Array(session.channels.enumerated()), id: \.element.id) { position, entry in
+                        Button {
+                            if position != index {
+                                savePosition(isFinal: true)
+                                index = position
+                                start()
+                            }
+                            withAnimation { showsPanel = false }
+                        } label: {
+                            PanelRow(channel: entry, isPlaying: position == index)
+                        }
+                        .focused($panelFocus, equals: entry.id)
+                        .id(entry.id)
+                    }
+                }
+                .onAppear {
+                    proxy.scrollTo(channel.id, anchor: .center)
+                    // The row has to exist before it can take focus.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { panelFocus = channel.id }
+                }
+            }
+            .frame(width: 860)
+            .padding(.vertical, 40)
+            // Clear of the screen edge, which TVs often crop.
+            .padding(.leading, 50)
+            .background(.regularMaterial)
+            Spacer(minLength: 0)
+        }
+        .ignoresSafeArea()
+        .onExitCommand {
+            withAnimation { showsPanel = false }
         }
     }
 
@@ -158,11 +213,9 @@ struct PlayerScreen: View {
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
-                if hasTrackChoices {
-                    Text("Press select for audio and subtitles")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
+                Text(hasTrackChoices ? "Press select for channels, audio and subtitles" : "Press select for channels")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(40)
@@ -221,6 +274,45 @@ struct PlayerScreen: View {
         watchTask?.cancel()
         savePosition(isFinal: true)
         player.stop()
+    }
+}
+
+/// A row of the in-player channel list: the channel and what it is showing now and next.
+private struct PanelRow: View {
+    let channel: Channel
+    let isPlaying: Bool
+
+    @EnvironmentObject private var epg: EPGStore
+    @EnvironmentObject private var resume: ResumeStore
+
+    var body: some View {
+        let programmes = epg.guide.nowAndNext(channelID: channel.tvgID, at: Date())
+        HStack(spacing: 16) {
+            Image(systemName: "play.fill")
+                .font(.caption)
+                .opacity(isPlaying ? 1 : 0)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(channel.name)
+                    .lineLimit(1)
+                if let now = programmes.now {
+                    Text("\(now.title)  ·  until \(now.stop.formatted(date: .omitted, time: .shortened))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                if let next = programmes.next {
+                    Text("Next: \(next.title)")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+                if channel.kind != .live, let label = resume.label(for: channel) {
+                    Text(label)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
     }
 }
 
