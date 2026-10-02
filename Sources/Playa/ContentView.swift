@@ -89,6 +89,7 @@ struct ContentView: View {
                 } label: {
                     Label("Reload playlist", systemImage: "arrow.clockwise")
                 }
+                .help("Download the playlist again")
                 .disabled(store.active == nil || store.isLoading)
 
                 Button {
@@ -96,6 +97,7 @@ struct ContentView: View {
                 } label: {
                     Label("Add playlist…", systemImage: "plus")
                 }
+                .help("Add a playlist from a URL or a file")
             }
         }
         .sheet(isPresented: $showingPlaylistSheet) {
@@ -607,6 +609,7 @@ private struct PlayerPane: View {
                     .frame(width: 20)
             }
             .keyboardShortcut(spaceTogglesPause ? KeyboardShortcut(.space, modifiers: []) : nil)
+            .help(player.isPaused || isHeld ? "Play (Space)" : "Pause (Space)")
             .disabled(channel == nil)
 
             if let channel, channel.kind != .live {
