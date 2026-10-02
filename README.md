@@ -35,6 +35,18 @@ cd Playa
 
 This builds `Playa.app` in the repository folder and launches it. The first build downloads the prebuilt mpv libraries from [MPVKit](https://github.com/mpvkit/MPVKit), a few hundred megabytes. The resulting app is self-contained and needs nothing else installed. Run the tests with `swift test`.
 
+## Apple TV
+
+There is an early Apple TV version in `tvOS/`. It shares the playlist, guide, series and player code with the Mac app and has its own interface for the remote: Live TV, Films, Series, Search and Settings.
+
+```sh
+brew install xcodegen
+xcodegen
+open PlayaTV.xcodeproj
+```
+
+Choose your Apple TV or a tvOS simulator as the destination and run. In the player, up and down change channel, left and right skip in films and episodes, and Play/Pause pauses.
+
 ## Using it
 
 1. Click **+** in the toolbar and paste your M3U URL, or choose a `.m3u` file.
@@ -68,7 +80,8 @@ Playlist addresses usually contain your provider login. Playa keeps them on your
 | Path | Contents |
 |---|---|
 | `Sources/PlayaCore` | Playlist, guide and series parsing. No UI; covered by tests. |
-| `Sources/Playa` | The SwiftUI/AppKit app and the mpv player wrapper. |
+| `Sources/Playa` | The Mac app, plus the stores and mpv player wrapper shared with Apple TV. |
+| `tvOS` | The Apple TV interface. `project.yml` describes its Xcode project. |
 | `Support` | `Info.plist`, the icon and the script that draws it. |
 
 ## Licence

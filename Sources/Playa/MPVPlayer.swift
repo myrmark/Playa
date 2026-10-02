@@ -1,5 +1,6 @@
-import AppKit
+import Foundation
 import Libmpv
+import QuartzCore
 
 /// Thin wrapper around a libmpv handle. mpv draws straight into `videoLayer`
 /// with Metal (through MoltenVK), on its own thread.
@@ -66,7 +67,7 @@ final class MPVPlayer: ObservableObject {
     init() {
         mpv = mpv_create()
         videoLayer.framebufferOnly = true
-        videoLayer.backgroundColor = NSColor.black.cgColor
+        videoLayer.backgroundColor = CGColor(gray: 0, alpha: 1)
         // mpv takes the layer as an integer "window id" and must have it before it initialises.
         var layerAddress = Int64(Int(bitPattern: Unmanaged.passUnretained(videoLayer).toOpaque()))
         mpv_set_option(mpv, "wid", MPV_FORMAT_INT64, &layerAddress)

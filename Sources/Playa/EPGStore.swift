@@ -91,9 +91,6 @@ final class EPGStore: ObservableObject {
     }
 
     private static func cacheFile(for id: UUID) -> URL {
-        let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Playa", isDirectory: true)
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory.appendingPathComponent("guide-\(id.uuidString).xml")
+        return Storage.directory.appendingPathComponent("guide-\(id.uuidString).xml")
     }
 }

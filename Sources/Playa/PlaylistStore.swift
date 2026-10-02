@@ -217,12 +217,7 @@ final class PlaylistStore: ObservableObject {
         defaults.set(activeID?.uuidString, forKey: Self.activeKey)
     }
 
-    private var cacheDirectory: URL {
-        let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Playa", isDirectory: true)
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory
-    }
+    private var cacheDirectory: URL { Storage.directory }
 
     private func cacheFile(for id: UUID) -> URL {
         cacheDirectory.appendingPathComponent("playlist-\(id.uuidString).m3u")
