@@ -63,6 +63,10 @@ targets:
     deploymentTarget: "17.0"
     sources:
       - path: tvOS
+      # Screens that are the same on Apple TV, iPhone and iPad.
+      - path: Shared
+      - path: Sources/Playa/FollowingStore.swift
+        group: Shared
       # Stores and the player wrapper are shared with the Mac app.
       - path: Sources/Playa/PlaylistStore.swift
         group: Shared
@@ -119,6 +123,9 @@ targets:
     deploymentTarget: "17.0"
     sources:
       - path: iOS
+      - path: Shared
+      - path: Sources/Playa/FollowingStore.swift
+        group: Shared
       # Stores and the player wrapper are shared with the Mac and Apple TV apps.
       - path: Sources/Playa/PlaylistStore.swift
         group: Shared

@@ -55,6 +55,8 @@ struct ContentView: View {
     @StateObject private var store = PlaylistStore()
     @StateObject private var epg = EPGStore()
     @StateObject private var resume = ResumeStore()
+    @StateObject private var following = FollowingStore()
+    @State private var showingFollowing = false
     @AppStorage(SettingsView.autoplayKey) private var autoplayOnLaunch = false
     /// The last channel is selected at launch but not played until the user asks: starting a
     /// stream unprompted could be a second one on a single-stream subscription.
@@ -141,7 +143,7 @@ struct ContentView: View {
                 },
                 zap: zap,
                 // The guide has a search field of its own, where these keys must type.
-                spaceTogglesPause: !isSearching && !showingGuide,
+                spaceTogglesPause: !isSearching && !showingGuide && !showingFollowing,
                 programmes: epg.guide.nowAndNext(channelID: selectedChannel?.tvgID, at: now),
                 isFavourite: selectedChannel.map { store.favourites.contains($0.key) } ?? false,
                 toggleFavourite: { if let selectedChannel { store.toggleFavourite(selectedChannel) } }
@@ -168,9 +170,38 @@ struct ContentView: View {
                 )
             }
         }
+        .overlay {
+            if showingFollowing {
+                FollowingView(
+                    following: following,
+                    playlist: store.playlist,
+                    guide: epg.guide,
+                    guideVersion: epg.version,
+                    favourites: store.favourites,
+                    hiddenGroups: store.hiddenGroups,
+                    now: now,
+                    onPlay: { channel in
+                        holdsPlayback = false
+                        selectedChannel = channel
+                        showingFollowing = false
+                    },
+                    onClose: { showingFollowing = false }
+                )
+            }
+        }
         .toolbar {
             ToolbarItemGroup {
                 Button {
+                    showingGuide = false
+                    showingFollowing.toggle()
+                } label: {
+                    Label("Following", systemImage: "binoculars")
+                }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
+                .help("Broadcasts of the teams and shows you follow (⇧⌘F)")
+
+                Button {
+                    showingFollowing = false
                     showingGuide.toggle()
                 } label: {
                     Label("TV Guide", systemImage: "calendar")

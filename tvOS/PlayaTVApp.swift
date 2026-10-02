@@ -9,6 +9,7 @@ struct PlayaTVApp: App {
     @StateObject private var resume = ResumeStore()
     @StateObject private var player = MPVPlayer()
     @StateObject private var listEditor = ListEditor()
+    @StateObject private var following = FollowingStore()
 
     init() {
         try? AVAudioSession.sharedInstance().setCategory(.playback)
@@ -22,6 +23,7 @@ struct PlayaTVApp: App {
                 .environmentObject(resume)
                 .environmentObject(player)
                 .environmentObject(listEditor)
+                .environmentObject(following)
         }
     }
 }
@@ -51,6 +53,9 @@ struct RootView: View {
                         .tabItem { Text(kind.title) }
                         .tag(kind.rawValue)
                     }
+                    FollowingTab()
+                        .tabItem { Text("Following") }
+                        .tag("following")
                     SearchView()
                         .tabItem { Label("Search", systemImage: "magnifyingglass") }
                         .tag("search")
