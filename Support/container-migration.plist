@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Builds before the App Sandbox kept their caches here; macOS moves them into the
+     sandboxed app's container the first time it runs. Preferences move automatically. -->
+<plist version="1.0">
+<dict>
+    <key>Move</key>
+    <array>
+        <string>${ApplicationSupport}/Playa</string>
+    </array>
+</dict>
+</plist>

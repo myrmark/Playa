@@ -8,6 +8,9 @@ struct SavedPlaylist: Identifiable, Codable, Hashable {
     var name: String
     var url: String
     var lastChannelURL: String?
+    /// For a playlist added from a file on the Mac: the sandbox's permission slip to read
+    /// that file again in later sessions.
+    var bookmark: Data?
 }
 
 @MainActor
@@ -420,7 +423,12 @@ final class PlaylistStore: ObservableObject {
             errorMessage = "“\(existing.name)” already uses this address."
             return false
         }
-        let entry = SavedPlaylist(name: name.isEmpty ? Self.defaultName(for: urlString) : name, url: urlString)
+        var entry = SavedPlaylist(name: name.isEmpty ? Self.defaultName(for: urlString) : name, url: urlString)
+        #if os(macOS)
+        if let fileURL = URL(string: urlString), fileURL.isFileURL {
+            entry.bookmark = try? fileURL.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
+        }
+        #endif
         guard case .updated(let parsed) = await download(entry, quietly: false) else { return false }
         saved.append(entry)
         activeID = entry.id
@@ -512,7 +520,8 @@ final class PlaylistStore: ObservableObject {
         do {
             let data: Data
             if url.isFileURL {
-                data = try await Task.detached { try Data(contentsOf: url) }.value
+                let bookmark = entry.bookmark
+                data = try await Task.detached { try Self.readFile(url, bookmark: bookmark) }.value
             } else {
                 let progress = DownloadProgress()
                 let poll = Task {
@@ -588,6 +597,21 @@ final class PlaylistStore: ObservableObject {
             plainText: base.appendingPathExtension("m3u"),
             digestKey: "playlistDigest.\(id.uuidString)"
         )
+    }
+
+    /// Reads a playlist file. In the sandbox a file the user picked earlier can only be read
+    /// again through the bookmark made when they picked it.
+    private nonisolated static func readFile(_ url: URL, bookmark: Data?) throws -> Data {
+        #if os(macOS)
+        if let bookmark {
+            var isStale = false
+            let resolved = try URL(resolvingBookmarkData: bookmark, options: .withSecurityScope, relativeTo: nil, bookmarkDataIsStale: &isStale)
+            let isAccessing = resolved.startAccessingSecurityScopedResource()
+            defer { if isAccessing { resolved.stopAccessingSecurityScopedResource() } }
+            return try Data(contentsOf: resolved)
+        }
+        #endif
+        return try Data(contentsOf: url)
     }
 
     private nonisolated static func digest(of data: Data) -> String {

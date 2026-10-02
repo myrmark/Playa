@@ -19,7 +19,7 @@ settingGroups:
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.0"
     ENABLE_USER_SCRIPT_SANDBOXING: false
-    MARKETING_VERSION: "0.1.0"
+    MARKETING_VERSION: "1.0.0"
     CURRENT_PROJECT_VERSION: "1"
 targets:
   # Named PlayaMac so its scheme doesn't collide with the package's "Playa" executable.
@@ -30,6 +30,7 @@ targets:
     sources:
       - path: Sources/Playa
       - path: Support/AppIcon.icns
+      - path: Support/container-migration.plist
     dependencies:
       - package: Playa
         product: PlayaCore
@@ -38,6 +39,12 @@ targets:
     entitlements:
       path: Support/Playa.entitlements
       properties:
+        # The Mac App Store requires the sandbox. Playa only needs to reach the network and
+        # to read playlist files the user picks (and re-read them later through a bookmark).
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        com.apple.security.files.user-selected.read-only: true
+        com.apple.security.files.bookmarks.app-scope: true
         # Sync between the user's devices: iCloud key-value storage and a shared keychain group.
         com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)com.filipmalmberg.Playa
         keychain-access-groups:
@@ -84,6 +91,8 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
         UIRequiredDeviceCapabilities: [arm64]
+        # Only standard system encryption (HTTPS, CryptoKit), which is exempt from export paperwork.
+        ITSAppUsesNonExemptEncryption: false
         # Most IPTV providers serve playlists and streams over plain http.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
@@ -91,12 +100,14 @@ targets:
       path: tvOS/PlayaTV.entitlements
       properties:
         # The same storage and keychain group as the Mac app, so the two stay in sync.
+        # Both apps also share one bundle identifier, which is what makes them a single
+        # App Store purchase.
         com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)com.filipmalmberg.Playa
         keychain-access-groups:
           - $(AppIdentifierPrefix)com.filipmalmberg.Playa
     settings:
       groups: [shared]
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.filipmalmberg.Playa.tv
+        PRODUCT_BUNDLE_IDENTIFIER: com.filipmalmberg.Playa
         PRODUCT_NAME: Playa
         ASSETCATALOG_COMPILER_APPICON_NAME: "App Icon & Top Shelf Image"
