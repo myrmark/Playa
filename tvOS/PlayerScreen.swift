@@ -21,6 +21,7 @@ struct PlayerScreen: View {
     @State private var index = 0
     @State private var showsInfo = true
     @State private var infoToken = 0
+    @State private var showsTracks = false
 
     private var channel: Channel { session.channels[index] }
     private var isLive: Bool { channel.kind == .live }
@@ -52,6 +53,11 @@ struct PlayerScreen: View {
             }
         }
         .focusable()
+        // Pressing select opens the audio and subtitle choices when the stream has any.
+        .onTapGesture {
+            if hasTrackChoices { showsTracks = true } else { flashInfo() }
+        }
+        .sheet(isPresented: $showsTracks) { trackList }
         .onPlayPauseCommand {
             if player.canRetry { player.retry() } else { player.togglePause() }
             flashInfo()
@@ -80,6 +86,45 @@ struct PlayerScreen: View {
         }
     }
 
+    private var hasTrackChoices: Bool {
+        player.tracks.filter { $0.kind == .audio }.count > 1 || player.tracks.contains { $0.kind == .subtitle }
+    }
+
+    private var trackList: some View {
+        let audio = player.tracks.filter { $0.kind == .audio }
+        let subtitles = player.tracks.filter { $0.kind == .subtitle }
+        return List {
+            if audio.count > 1 {
+                Section("Audio") {
+                    ForEach(audio) { track in
+                        trackButton(track.label, isSelected: track.isSelected) { player.selectAudio(track) }
+                    }
+                }
+            }
+            if !subtitles.isEmpty {
+                Section("Subtitles") {
+                    trackButton("Off", isSelected: !subtitles.contains(where: \.isSelected)) { player.selectSubtitle(nil) }
+                    ForEach(subtitles) { track in
+                        trackButton(track.label, isSelected: track.isSelected) { player.selectSubtitle(track) }
+                    }
+                }
+            }
+        }
+    }
+
+    private func trackButton(_ title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            action()
+            showsTracks = false
+        } label: {
+            HStack {
+                Text(title)
+                Spacer()
+                if isSelected { Image(systemName: "checkmark") }
+            }
+        }
+    }
+
     private var infoBar: some View {
         VStack {
             Spacer()
@@ -102,6 +147,11 @@ struct PlayerScreen: View {
                     Text("\(Self.timestamp(player.position)) / \(Self.timestamp(player.duration))")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
+                }
+                if hasTrackChoices {
+                    Text("Press select for audio and subtitles")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
