@@ -90,7 +90,7 @@ struct ChannelTable: NSViewRepresentable {
         func menuNeedsUpdate(_ menu: NSMenu) {
             menu.removeAllItems()
             guard let row = tableView?.clickedRow, channels.indices.contains(row) else { return }
-            let isFavourite = favourites.contains(channels[row].url)
+            let isFavourite = favourites.contains(channels[row].key)
             let item = NSMenuItem(
                 title: isFavourite ? "Remove from Favourites" : "Add to Favourites",
                 action: #selector(toggleFavouriteForClickedRow),
@@ -141,7 +141,7 @@ struct ChannelTable: NSViewRepresentable {
             let cell = tableView.makeView(withIdentifier: identifier, owner: nil) as? ChannelCellView
                 ?? ChannelCellView(identifier: identifier)
             let channel = channels[row]
-            cell.configure(with: channel, title: title(channel), isFavourite: favourites.contains(channel.url), subtitle: subtitle(channel))
+            cell.configure(with: channel, title: title(channel), isFavourite: favourites.contains(channel.key), subtitle: subtitle(channel))
             cell.onToggleFavourite = { [weak self] in self?.toggleFavourite(channel) }
             return cell
         }

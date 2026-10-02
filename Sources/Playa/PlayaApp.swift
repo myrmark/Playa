@@ -19,6 +19,14 @@ struct PlayaApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // `Playa.app/Contents/MacOS/Playa --diagnose` reports storage and sync state and quits.
+        if CommandLine.arguments.contains("--diagnose") {
+            print(PlaylistStore().diagnostics)
+            exit(0)
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Needed when launched as a bare executable (`swift run`) rather than from the .app bundle.
         NSApp.setActivationPolicy(.regular)

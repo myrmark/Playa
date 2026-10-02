@@ -51,7 +51,7 @@ struct ContentView: View {
                 zap: zap,
                 spaceTogglesPause: !isSearching,
                 programmes: epg.guide.nowAndNext(channelID: selectedChannel?.tvgID, at: now),
-                isFavourite: selectedChannel.map { store.favourites.contains($0.url) } ?? false,
+                isFavourite: selectedChannel.map { store.favourites.contains($0.key) } ?? false,
                 toggleFavourite: { if let selectedChannel { store.toggleFavourite(selectedChannel) } }
             )
                 .navigationTitle(selectedChannel?.name ?? "Playa")
@@ -167,7 +167,7 @@ struct ContentView: View {
     /// The guide opens on what the sidebar is showing, or on favourites when it shows everything.
     private var guideStartFilter: ChannelFilter {
         if section == .live, filter != .all { return filter }
-        let hasLiveFavourite = store.playlist.channels.contains { $0.kind == .live && $0.tvgID != nil && store.favourites.contains($0.url) }
+        let hasLiveFavourite = store.playlist.channels.contains { $0.kind == .live && $0.tvgID != nil && store.favourites.contains($0.key) }
         return hasLiveFavourite ? .favourites : .all
     }
 
@@ -217,7 +217,7 @@ struct ContentView: View {
             guard channel.kind == section else { return false }
             switch filter {
             case .all: break
-            case .favourites: guard favourites.contains(channel.url) else { return false }
+            case .favourites: guard favourites.contains(channel.key) else { return false }
             case .group(let group): guard channel.group == group else { return false }
             }
             return matchesSearch(channel.name)

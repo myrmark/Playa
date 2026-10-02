@@ -17,6 +17,13 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .safeAreaInset(edge: .bottom) {
+            Text("Playlists, favourites and resume positions sync through your iCloud account to Playa on your other devices. Playlist addresses travel in iCloud Keychain, which is end-to-end encrypted. Playlists added from a file stay on this Mac.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 16)
+        }
         .frame(width: 480)
         .fixedSize(horizontal: false, vertical: true)
     }

@@ -1,30 +1,28 @@
 #!/bin/bash
-# Builds Playa and wraps it in Playa.app. Pass "run" to launch it afterwards.
+# Builds the Mac app into ./Playa.app. Pass "run" to launch it afterwards.
 #
-# The app is signed with a "Developer ID Application" certificate when the keychain has one,
-# and ad-hoc otherwise. Set PLAYA_RELEASE=1 for a timestamped signature, which notarisation needs.
+# With a Local.xcconfig naming your Apple team (DEVELOPMENT_TEAM = XXXXXXXXXX) the app is signed
+# for development and gets iCloud sync. Without one it is signed ad-hoc and simply doesn't sync.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-swift build -c release
+command -v xcodegen >/dev/null || { echo "xcodegen is needed: brew install xcodegen" >&2; exit 1; }
+xcodegen generate --quiet
 
-APP="Playa.app"
-rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$(swift build -c release --show-bin-path)/Playa" "$APP/Contents/MacOS/Playa"
-cp Support/Info.plist "$APP/Contents/Info.plist"
-cp Support/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
-
-IDENTITY=$(security find-identity -v -p codesigning | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"' || true)
-if [ -n "$IDENTITY" ]; then
-    if [ "${PLAYA_RELEASE:-}" = "1" ]; then TIMESTAMP="--timestamp"; else TIMESTAMP="--timestamp=none"; fi
-    codesign --force --options runtime $TIMESTAMP --sign "$IDENTITY" "$APP"
-    echo "Built $APP (signed with Developer ID)"
+ARGS=(-project Playa.xcodeproj -scheme PlayaMac -configuration Release -derivedDataPath .build/xcode)
+if [ -f Local.xcconfig ]; then
+    ARGS+=(-allowProvisioningUpdates -allowProvisioningDeviceRegistration)
 else
-    codesign --force --sign - "$APP"
-    echo "Built $APP (ad-hoc signed)"
+    ARGS+=(CODE_SIGN_IDENTITY=- CODE_SIGN_ENTITLEMENTS= CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=)
 fi
+xcodebuild "${ARGS[@]}" build | grep -E "error:|warning: unable|BUILD" || true
+
+PRODUCT=.build/xcode/Build/Products/Release/Playa.app
+[ -d "$PRODUCT" ] || { echo "Build failed" >&2; exit 1; }
+rm -rf Playa.app
+cp -R "$PRODUCT" Playa.app
+echo "Built Playa.app"
 
 if [ "${1:-}" = "run" ]; then
-    open "$APP"
+    open Playa.app
 fi

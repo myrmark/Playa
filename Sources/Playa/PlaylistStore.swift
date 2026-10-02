@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import PlayaCore
 
@@ -19,8 +20,28 @@ final class PlaylistStore: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var downloadedBytes: Int64 = 0
     @Published var errorMessage: String?
-    /// Stream URLs of starred channels, shared by all playlists.
+    /// `Channel.key`s of starred channels and `SeriesShow.favouriteKey`s of starred shows.
     @Published private(set) var favourites: Set<String> = []
+    /// Whether playlists were last seen arriving from, or being accepted by, iCloud.
+    @Published private(set) var playlistSyncWorks = false
+
+    /// What is synced between devices. Stamps decide whose copy is newer.
+    private struct SyncedFavourites: Codable {
+        var updatedAt: Date
+        var keys: [String]
+    }
+
+    private struct SyncedPlaylists: Codable {
+        struct Item: Codable {
+            var name: String
+            var url: String
+        }
+
+        var updatedAt: Date
+        var playlists: [Item]
+    }
+
+    private var subscription: AnyCancellable?
 
     private let defaults = UserDefaults.standard
     /// Cached playlists older than this are refreshed in the background.
@@ -43,15 +64,109 @@ final class PlaylistStore: ObservableObject {
     }
 
     func toggleFavourite(_ channel: Channel) {
-        toggleFavourite(key: channel.url)
+        toggleFavourite(key: channel.key)
     }
 
-    /// Favourites are keyed by stream URL for channels and by `SeriesShow.favouriteKey` for shows.
+    /// Favourites are keyed by `Channel.key` for channels and by `SeriesShow.favouriteKey` for shows.
     func toggleFavourite(key: String) {
         if favourites.remove(key) == nil {
             favourites.insert(key)
         }
         persistFavourites()
+        favouritesStamp = Date()
+        CloudSync.write(SyncedFavourites(updatedAt: favouritesStamp, keys: favourites.sorted()), key: Self.favouritesKey)
+    }
+
+    private var favouritesStamp: Date {
+        get { Date(timeIntervalSince1970: defaults.double(forKey: "favouritesStamp")) }
+        set { defaults.set(newValue.timeIntervalSince1970, forKey: "favouritesStamp") }
+    }
+
+    private var playlistsStamp: Date {
+        get { Date(timeIntervalSince1970: defaults.double(forKey: "playlistsStamp")) }
+        set { defaults.set(newValue.timeIntervalSince1970, forKey: "playlistsStamp") }
+    }
+
+    private func pullFavourites() {
+        let remote = CloudSync.read(SyncedFavourites.self, key: Self.favouritesKey)
+        let neverSynced = favouritesStamp.timeIntervalSince1970 == 0
+        if let remote, neverSynced {
+            // First contact: keep what both sides have instead of letting one replace the other.
+            favourites.formUnion(remote.keys)
+            favouritesStamp = Date()
+        } else if let remote, remote.updatedAt > favouritesStamp {
+            favourites = Set(remote.keys)
+            favouritesStamp = remote.updatedAt
+        } else if remote != nil || favourites.isEmpty {
+            return
+        } else if neverSynced {
+            favouritesStamp = Date()
+        }
+        persistFavourites()
+        if Set(remote?.keys ?? []) != favourites {
+            CloudSync.write(SyncedFavourites(updatedAt: favouritesStamp, keys: favourites.sorted()), key: Self.favouritesKey)
+        }
+    }
+
+    /// A few counts for `Playa --diagnose`; nothing that identifies a provider.
+    var diagnostics: String {
+        let remote = CloudSync.readSecret(SyncedPlaylists.self, account: "playlists")
+        return """
+        encryption key available: \(Vault.isAvailable)
+        playlists on this device: \(saved.count)
+        favourites: \(favourites.count)
+        playlists in iCloud Keychain: \(remote.map { "\($0.playlists.count), last changed \($0.updatedAt.formatted(date: .abbreviated, time: .standard))" } ?? "none readable")
+        last started, per iCloud key-value storage: \(CloudSync.lastSeen)
+        """
+    }
+
+    /// Playlists that make sense on another device: files on this one don't.
+    private var syncablePlaylists: [SavedPlaylist] {
+        saved.filter { !$0.url.hasPrefix("file:") }
+    }
+
+    private func pushPlaylists() {
+        playlistsStamp = Date()
+        let items = syncablePlaylists.map { SyncedPlaylists.Item(name: $0.name, url: $0.url) }
+        playlistSyncWorks = CloudSync.writeSecret(SyncedPlaylists(updatedAt: playlistsStamp, playlists: items), account: "playlists")
+    }
+
+    /// Adopts playlists added or removed on another device. Matching is by address.
+    private func pullPlaylists() async {
+        guard let remote = CloudSync.readSecret(SyncedPlaylists.self, account: "playlists") else {
+            // Nothing in iCloud yet: offer what this device has.
+            if !syncablePlaylists.isEmpty, playlistsStamp.timeIntervalSince1970 == 0 { pushPlaylists() }
+            return
+        }
+        playlistSyncWorks = true
+        let neverSynced = playlistsStamp.timeIntervalSince1970 == 0
+        guard neverSynced || remote.updatedAt > playlistsStamp else { return }
+
+        let remoteURLs = Set(remote.playlists.map(\.url))
+        if !neverSynced {
+            for entry in syncablePlaylists where !remoteURLs.contains(entry.url) {
+                await removeLocally(entry.id)
+            }
+        }
+        for item in remote.playlists {
+            if let index = saved.firstIndex(where: { $0.url == item.url }) {
+                saved[index].name = item.name
+            } else {
+                saved.append(SavedPlaylist(name: item.name, url: item.url))
+            }
+        }
+        persist()
+        if neverSynced, Set(syncablePlaylists.map(\.url)) != remoteURLs {
+            // First contact, and this device had playlists iCloud didn't.
+            pushPlaylists()
+        } else {
+            playlistsStamp = remote.updatedAt
+        }
+        if active == nil, let first = saved.first {
+            activeID = first.id
+            persist()
+            await show(first, forceDownload: false)
+        }
     }
 
     init() {
@@ -61,6 +176,11 @@ final class PlaylistStore: ObservableObject {
         } else if let plain = defaults.stringArray(forKey: Self.favouritesKey) {
             // Versions before the vault stored favourites and playlists unencrypted.
             favourites = Set(plain)
+            persistFavourites()
+        }
+        // Older versions also stored channel favourites as stream addresses.
+        if favourites.contains(where: { $0.contains("://") }) {
+            favourites = Set(favourites.map { $0.contains("://") ? Channel.key(forStreamURL: $0) : $0 })
             persistFavourites()
         }
         if let stored = defaults.data(forKey: Self.savedKey),
@@ -87,6 +207,19 @@ final class PlaylistStore: ObservableObject {
 
     /// Shows the cached copy of the active playlist straight away if there is one, otherwise downloads it.
     func loadOnLaunch() async {
+        CloudSync.start()
+        pullFavourites()
+        subscription = CloudSync.changes.receive(on: DispatchQueue.main).sink { [weak self] _ in
+            MainActor.assumeIsolated { self?.pullFavourites() }
+        }
+        await pullPlaylists()
+        // The Keychain doesn't announce items arriving from other devices, so look now and then.
+        Task {
+            while true {
+                try? await Task.sleep(for: .seconds(90))
+                await pullPlaylists()
+            }
+        }
         // Seal plain-text caches left by older versions, including playlists that aren't open.
         let files = saved.map { (cacheFile(for: $0.id), legacyCacheFile(for: $0.id)) }
         Task.detached(priority: .utility) {
@@ -112,6 +245,7 @@ final class PlaylistStore: ObservableObject {
         activeID = entry.id
         playlist = parsed
         persist()
+        pushPlaylists()
         return true
     }
 
@@ -123,6 +257,11 @@ final class PlaylistStore: ObservableObject {
     }
 
     func remove(_ id: UUID) async {
+        await removeLocally(id)
+        pushPlaylists()
+    }
+
+    private func removeLocally(_ id: UUID) async {
         saved.removeAll { $0.id == id }
         try? FileManager.default.removeItem(at: cacheFile(for: id))
         try? FileManager.default.removeItem(at: legacyCacheFile(for: id))

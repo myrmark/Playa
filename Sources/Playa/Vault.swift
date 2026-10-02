@@ -23,30 +23,50 @@ enum Vault {
     }
 
     private static func loadKey() -> SymmetricKey? {
-        guard let service = Bundle.main.bundleIdentifier else {
+        guard let bundleID = Bundle.main.bundleIdentifier else {
             return developmentKey()
         }
-        let query: [CFString: Any] = [
+        // The key lives in the data-protection keychain, where access follows the app's
+        // entitlements rather than one exact code signature.
+        var query: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
-            kSecAttrService: service,
+            kSecAttrService: "Playa.vault",
             kSecAttrAccount: "vault-key",
         ]
+        #if os(macOS)
+        query[kSecUseDataProtectionKeychain] = true
+        #endif
+        if let key = readKey(query) { return key }
+
+        // Earlier versions kept it under the bundle identifier; on the Mac that was the
+        // login keychain, which is also where builds without entitlements still keep it.
+        let legacyQuery: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: bundleID,
+            kSecAttrAccount: "vault-key",
+        ]
+        let legacy = readKey(legacyQuery)
+        let key = legacy ?? SymmetricKey(size: .bits256)
+        if store(key, query) || legacy != nil || store(key, legacyQuery) {
+            return key
+        }
+        FileHandle.standardError.write(Data("Playa: could not store its Keychain key.\n".utf8))
+        return nil
+    }
+
+    private static func readKey(_ query: [CFString: Any]) -> SymmetricKey? {
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query.merging([kSecReturnData: true]) { $1 } as CFDictionary, &result)
-        if status == errSecSuccess, let data = result as? Data {
-            return SymmetricKey(data: data)
-        }
-        guard status == errSecItemNotFound else {
-            FileHandle.standardError.write(Data("Playa: could not read its Keychain key (status \(status)).\n".utf8))
-            return nil
-        }
-        let key = SymmetricKey(size: .bits256)
-        let added = SecItemAdd(query.merging([
+        guard status == errSecSuccess, let data = result as? Data else { return nil }
+        return SymmetricKey(data: data)
+    }
+
+    private static func store(_ key: SymmetricKey, _ query: [CFString: Any]) -> Bool {
+        SecItemAdd(query.merging([
             kSecValueData: key.withUnsafeBytes { Data($0) },
             kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlock,
             kSecAttrLabel: "Playa playlist encryption key",
-        ]) { $1 } as CFDictionary, nil)
-        return added == errSecSuccess ? key : nil
+        ]) { $1 } as CFDictionary, nil) == errSecSuccess
     }
 
     /// A bare executable (`swift run`) has no stable signature, so the Keychain would ask for

@@ -60,7 +60,16 @@ struct RootView: View {
                 }
             }
         }
-        .task { await store.loadOnLaunch() }
+        .task {
+            await store.loadOnLaunch()
+            // Launching with --diagnose (from Xcode or devicectl) reports storage and sync state.
+            if CommandLine.arguments.contains("--diagnose") {
+                for _ in 0..<3 {
+                    print("PLAYA-DIAGNOSE\n\(store.diagnostics)")
+                    try? await Task.sleep(for: .seconds(45))
+                }
+            }
+        }
         .onReceive(store.$playlist) { epg.load(for: store.active, playlist: $0) }
     }
 }

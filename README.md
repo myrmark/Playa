@@ -23,7 +23,8 @@ Playa is a player only. It ships with no channels or streams; you bring your own
 ## Requirements
 
 - macOS 14 or later
-- Xcode or the Xcode Command Line Tools
+- Xcode
+- [XcodeGen](https://github.com/yonaskolb/XcodeGen): `brew install xcodegen`
 
 ## Build and run
 
@@ -33,24 +34,31 @@ cd Playa
 ./build-app.sh run
 ```
 
-This builds `Playa.app` in the repository folder and launches it. The first build downloads the prebuilt mpv libraries from [MPVKit](https://github.com/mpvkit/MPVKit), a few hundred megabytes. The resulting app is self-contained and needs nothing else installed. Run the tests with `swift test`.
+This generates the Xcode project, builds `Playa.app` in the repository folder and launches it. The first build downloads the prebuilt mpv libraries from [MPVKit](https://github.com/mpvkit/MPVKit), a few hundred megabytes. The resulting app is self-contained and needs nothing else installed. Run the tests with `swift test`.
 
 ## Apple TV
 
 There is an early Apple TV version in `tvOS/`. It shares the playlist, guide, series and player code with the Mac app and has its own interface for the remote: Live TV, Films, Series, a TV guide grid, Search and Settings.
 
 ```sh
-brew install xcodegen
 echo "DEVELOPMENT_TEAM = YOURTEAMID" > Local.xcconfig
 xcodegen
-open PlayaTV.xcodeproj
+open Playa.xcodeproj
 ```
 
-Replace `YOURTEAMID` with your Apple developer team ID. Choose your Apple TV or a tvOS simulator as the destination and run. In the player, up and down change channel, left and right skip in films and episodes, and Play/Pause pauses.
+Replace `YOURTEAMID` with your Apple developer team ID. Choose the **PlayaTV** scheme, pick your Apple TV or a tvOS simulator as the destination and run. In the player, up and down change channel, left and right skip in films and episodes, and Play/Pause pauses.
 
 ## Making a release
 
-`./release.sh` builds the Mac app, signs it with your Developer ID certificate, has Apple notarise it and writes `Playa-<version>.zip`. It needs a "Developer ID Application" certificate in the keychain and a stored notarisation login (`xcrun notarytool store-credentials playa-notary`). Without a certificate, `./build-app.sh` falls back to an ad-hoc signature, which is fine for running your own build.
+`./release.sh` archives the Mac app, signs it with your Developer ID certificate, has Apple notarise it and writes `Playa-<version>.zip`. It needs `Local.xcconfig` with your team ID, a "Developer ID Application" certificate in the keychain and a stored notarisation login (`xcrun notarytool store-credentials playa-notary`).
+
+Without a `Local.xcconfig`, `./build-app.sh` signs ad-hoc. That is fine for running your own build; it just doesn't sync.
+
+## Sync between devices
+
+Favourites and resume positions sync through the user's own iCloud account (key-value storage) between Playa on their devices. They are stored as fingerprints of the stream addresses, never the addresses themselves. Playlist addresses are offered to iCloud Keychain; that reaches other Macs but, so far, not Apple TV.
+
+`Playa.app/Contents/MacOS/Playa --diagnose` prints the storage and sync state.
 
 ## Using it
 
@@ -85,8 +93,9 @@ Playlist addresses usually contain your provider login, and so does every stream
 | Path | Contents |
 |---|---|
 | `Sources/PlayaCore` | Playlist, guide and series parsing. No UI; covered by tests. |
-| `Sources/Playa` | The Mac app, plus the stores and mpv player wrapper shared with Apple TV. |
-| `tvOS` | The Apple TV interface. `project.yml` describes its Xcode project. |
+| `Sources/Playa` | The Mac app, plus the stores, sync and mpv player wrapper shared with Apple TV. |
+| `tvOS` | The Apple TV interface. |
+| `project.yml` | Describes the Xcode project for both apps. `Package.swift` covers the shared core, its tests and a quick `swift build` of the Mac sources. |
 | `Support` | `Info.plist`, the icon and the script that draws it. |
 
 ## Licence

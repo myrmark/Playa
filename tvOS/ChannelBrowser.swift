@@ -85,7 +85,7 @@ struct ChannelList: View {
             playlist.channels.filter { channel in
                 guard channel.kind == kind else { return false }
                 switch filter {
-                case .favourites: return favourites.contains(channel.url)
+                case .favourites: return favourites.contains(channel.key)
                 case .group(let group): return channel.group == group
                 }
             }
@@ -133,14 +133,14 @@ struct ChannelRow: View {
                     }
                 }
                 Spacer(minLength: 0)
-                if store.favourites.contains(channel.url) {
+                if store.favourites.contains(channel.key) {
                     Image(systemName: "star.fill")
                         .foregroundStyle(.yellow)
                 }
             }
         }
         .contextMenu {
-            Button(store.favourites.contains(channel.url) ? "Remove from Favourites" : "Add to Favourites") {
+            Button(store.favourites.contains(channel.key) ? "Remove from Favourites" : "Add to Favourites") {
                 store.toggleFavourite(channel)
             }
         }

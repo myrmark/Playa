@@ -83,7 +83,7 @@ struct GuideView: View {
             guard channel.kind == .live else { return false }
             switch filter {
             case .all: break
-            case .favourites: guard favourites.contains(channel.url) else { return false }
+            case .favourites: guard favourites.contains(channel.key) else { return false }
             case .group(let group): guard channel.group == group else { return false }
             }
             if onlyWithProgrammes {

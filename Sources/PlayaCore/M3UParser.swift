@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 public enum ChannelKind: String, CaseIterable, Hashable, Sendable {
@@ -28,15 +29,26 @@ public struct Channel: Identifiable, Hashable, Sendable {
     public let logo: String?
     public let tvgID: String?
     public let kind: ChannelKind
+    /// Stands in for the stream address wherever one is stored or synced (favourites, resume
+    /// positions). Stream addresses contain the provider login; this fingerprint does not.
+    public let key: String
 
     public init(id: Int, name: String, url: String, group: String, logo: String?, tvgID: String?, kind: ChannelKind = .live) {
         self.kind = kind
+        self.key = Channel.key(forStreamURL: url)
         self.id = id
         self.name = name
         self.url = url
         self.group = group
         self.logo = logo
         self.tvgID = tvgID
+    }
+}
+
+extension Channel {
+    public static func key(forStreamURL url: String) -> String {
+        let digest = SHA256.hash(data: Data(url.utf8))
+        return Data(digest.prefix(9)).base64EncodedString()
     }
 }
 

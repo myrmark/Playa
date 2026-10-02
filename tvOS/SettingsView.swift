@@ -48,6 +48,15 @@ struct SettingsView: View {
                     Text("Off by default. Many providers allow only one stream per subscription and may ban accounts that open a second one. With this on, Playa can reopen a stream while another device is already watching.")
                 }
 
+                Section {
+                    Text(store.playlistSyncWorks ? "On" : "Not available")
+                } header: {
+                    Text("iCloud sync")
+                } footer: {
+                    Text("Playlists, favourites and resume positions sync with Playa on your other devices signed in to the same Apple Account with iCloud Keychain on.")
+                }
+                .foregroundStyle(.secondary)
+
                 Section("TV guide") {
                     switch epg.status {
                     case .loading: Text("Loading…")

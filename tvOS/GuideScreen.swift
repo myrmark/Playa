@@ -123,10 +123,10 @@ struct GuideScreen: View {
             let withGuide = Set(listed.map(\.group))
             let groups = (playlist.groupsByKind[.live] ?? []).filter(withGuide.contains)
             // Open on favourites when there are any, otherwise on the first group.
-            let filter = current ?? (listed.contains { favourites.contains($0.url) } ? .favourites : groups.first.map(ChannelFilter.group))
+            let filter = current ?? (listed.contains { favourites.contains($0.key) } ? .favourites : groups.first.map(ChannelFilter.group))
             let rows = listed.filter { channel in
                 switch filter {
-                case .favourites: favourites.contains(channel.url)
+                case .favourites: favourites.contains(channel.key)
                 case .group(let group): channel.group == group
                 case nil: false
                 }
