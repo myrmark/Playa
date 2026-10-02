@@ -8,7 +8,7 @@ A free, native IPTV player for macOS. Point it at the M3U playlist from your pro
 
 Playa is a player only. It ships with no channels or streams; you bring your own playlist.
 
-> **Status: early.** It works well for daily use on the author's Mac, but for now it has to be built from source. A ready-made download is planned.
+Playa is being prepared for the App Store, as one purchase covering Mac and Apple TV. The source here is complete, and you are welcome to build it yourself.
 
 ## Features
 
@@ -49,9 +49,9 @@ open Playa.xcodeproj
 
 Replace `YOURTEAMID` with your Apple developer team ID. Choose the **PlayaTV** scheme, pick your Apple TV or a tvOS simulator as the destination and run. In the player, up and down change channel, left and right skip in films and episodes, and Play/Pause pauses.
 
-## Making a release
+## App Store builds
 
-`./release.sh` archives the Mac app, signs it with your Developer ID certificate, has Apple notarise it and writes `Playa-<version>.zip`. It needs `Local.xcconfig` with your team ID, a "Developer ID Application" certificate in the keychain and a stored notarisation login (`xcrun notarytool store-credentials playa-notary`).
+`./appstore.sh` archives the Mac and Apple TV apps and exports the packages; `./appstore.sh upload` sends them to App Store Connect. It needs `Local.xcconfig` with your team ID and `Local.env` with an App Store Connect API key (see the comments at the top of the script). The listing text, reviewer notes and a demo playlist of freely licensed streams are in `AppStore/`.
 
 Without a `Local.xcconfig`, `./build-app.sh` signs ad-hoc. That is fine for running your own build; it just doesn't sync.
 
@@ -86,6 +86,8 @@ Many IPTV providers allow a single stream per subscription and may ban accounts 
 Auto-play on launch and automatic reconnect can be turned on in **Settings** (⌘,) if your provider allows it. Playa cannot know what your other devices are doing, so watching on two devices at once is still up to you to avoid.
 
 ## Privacy
+
+The full policy is in [PRIVACY.md](PRIVACY.md). In short:
 
 Playlist addresses usually contain your provider login, and so does every stream address inside the playlist. On your device, Playa encrypts what it stores: the playlist list, the cached playlists, favourites, resume positions and the last channel are sealed with a key held in the Keychain. Playlist addresses are also kept in your own iCloud account so your other devices get them; see "Sync between devices". Playa only contacts the addresses in your playlist.
 
