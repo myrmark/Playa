@@ -33,6 +33,7 @@ struct PlayerScreen: View {
     @State private var watchTask: Task<Void, Never>?
     /// Playback details in the corner, for telling a slow stream from a slow player.
     @State private var showsHealth = false
+    @StateObject private var screen = ScreenRate()
 
     /// How solid the channel panel is, in percent; lower lets more of the picture through.
     /// Off unless chosen: on some TVs the switch of mode also changes how colours look.
@@ -331,6 +332,8 @@ struct PlayerScreen: View {
         guard let format else { return }
         // Interlaced 25 and 30 fps streams are shown at twice their frame rate.
         let rate = fps < 31 && fps > 24.5 ? fps * 2 : fps
+        // A screen already at that rate is left alone: asking would only risk a change of mode.
+        guard screen.rate > 0, abs(screen.rate - rate) > 1 else { return }
         displayManager?.preferredDisplayCriteria = AVDisplayCriteria(refreshRate: Float(rate), formatDescription: format)
     }
 
