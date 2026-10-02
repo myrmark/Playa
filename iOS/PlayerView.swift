@@ -91,6 +91,9 @@ struct PlayerView: View {
 
             if let edgeLevel {
                 EdgeLevelView(kind: edgeLevel.kind, value: edgeLevel.value)
+                    // At the top, clear of the picture's centre.
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .padding(.top, 12)
                     .transition(.opacity)
                     .allowsHitTesting(false)
             }
@@ -363,7 +366,7 @@ enum EdgeAdjustment {
     case volume, brightness
 }
 
-/// The level being set by an edge swipe, in the middle of the screen.
+/// The level being set by an edge swipe.
 private struct EdgeLevelView: View {
     let kind: EdgeAdjustment
     let value: Double
