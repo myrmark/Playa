@@ -32,10 +32,12 @@ enum ChannelFilter: Hashable {
     }
 }
 
-/// Where focus is in a two-pane browser: on an entry in the left column, or on an item on the right.
+/// Where focus is in a two-pane browser: on an entry in the left column, on an item on the right,
+/// or on one of the other buttons.
 enum BrowserFocus: Hashable {
     case filter(ChannelFilter)
     case item(Int)
+    case control(Int)
 }
 
 /// Requests for the list-name sheet, raised from menus anywhere in the app.
@@ -122,6 +124,10 @@ struct TwoPaneBrowser<Pane: View>: View {
     @State private var shown: ChannelFilter?
     @State private var wantsFocusInPane = false
     @State private var listToDelete: ChannelList?
+    /// The item last focused in the pane on show, to return to when coming down from the tab bar.
+    @State private var lastItem: BrowserFocus?
+    /// Set when a left-column menu was used, so focus returning from it stays in the column.
+    @State private var staysInColumn = false
     @FocusState private var focus: BrowserFocus?
 
     init(kind: ChannelKind, @ViewBuilder pane: @escaping (ChannelFilter, FocusState<BrowserFocus?>.Binding, Binding<Bool>) -> Pane) {
@@ -178,6 +184,22 @@ struct TwoPaneBrowser<Pane: View>: View {
         }
         .onAppear(perform: openStartFilter)
         .onChange(of: groups) { openStartFilter() }
+        .onChange(of: shown) { lastItem = nil }
+        .onChange(of: focus) { old, new in
+            if case .item = new { lastItem = new }
+            // Coming down from the tab bar lands in the left column; what is wanted is nearly
+            // always the channels already on show, so carry on into them.
+            guard old == nil, case .filter = new, shown != nil else { return }
+            if staysInColumn {
+                staysInColumn = false
+                return
+            }
+            DispatchQueue.main.async {
+                guard case .filter = focus else { return }
+                if let lastItem { focus = lastItem }
+                if case .filter = focus { wantsFocusInPane = true }
+            }
+        }
         // The right pane follows the left column's focus after a short pause, so scrolling
         // down the column doesn't load every group on the way.
         .task(id: focusedFilter) {
@@ -225,11 +247,21 @@ struct TwoPaneBrowser<Pane: View>: View {
                 Label("New List…", systemImage: "plus")
                     .foregroundStyle(.secondary)
             }
+            .focused($focus, equals: .control(0))
             Section("Groups") {
                 ForEach(groups, id: \.self) { group in
                     filterRow(.group(group), title: group, systemImage: nil)
                 }
             }
+        }
+    }
+
+    /// Focus comes back to the column once a menu closes; that return isn't an arrival from the tab bar.
+    private func stayInColumn() {
+        staysInColumn = true
+        Task {
+            try? await Task.sleep(for: .seconds(1))
+            staysInColumn = false
         }
     }
 
@@ -256,17 +288,17 @@ struct TwoPaneBrowser<Pane: View>: View {
         .focused($focus, equals: .filter(filter))
         .contextMenu {
             if startValue == filter.storageValue {
-                Button("Don't Open at Launch") { startValue = "" }
+                Button("Don't Open at Launch") { stayInColumn(); startValue = "" }
             } else {
-                Button("Open at Launch") { startValue = filter.storageValue }
+                Button("Open at Launch") { stayInColumn(); startValue = filter.storageValue }
             }
             if let list {
-                Button("Rename…") { listEditor.request = .rename(list) }
-                Button("Delete List", role: .destructive) { listToDelete = list }
+                Button("Rename…") { stayInColumn(); listEditor.request = .rename(list) }
+                Button("Delete List", role: .destructive) { stayInColumn(); listToDelete = list }
             }
             if case .group(let name) = filter {
                 // Hidden groups come back from Settings → Groups.
-                Button("Hide Group") { store.setHidden(true, groups: [name], kind: kind) }
+                Button("Hide Group") { stayInColumn(); store.setHidden(true, groups: [name], kind: kind) }
             }
         }
     }
@@ -348,6 +380,12 @@ struct ChannelPane: View {
         .fullScreenCover(item: $session) { session in
             PlayerScreen(session: session)
         }
+        .onChange(of: wantsFocus) { _, wants in
+            // Asked for after the channels were loaded; while loading, load() answers instead.
+            guard wants, let channels else { return }
+            if let first = channels.first { focus.wrappedValue = .item(first.id) }
+            wantsFocus = false
+        }
     }
 
     @ViewBuilder
@@ -407,6 +445,7 @@ struct ChannelPane: View {
                         .lineLimit(1)
                         .fixedSize()
                 }
+                .focused(focus, equals: .control(1))
             }
             Button {
                 Task { await store.refresh() }
@@ -418,6 +457,7 @@ struct ChannelPane: View {
                 }
             }
             .disabled(store.isLoading)
+            .focused(focus, equals: .control(2))
             Spacer()
             if isGuide {
                 Text(windowStart.formatted(.dateTime.weekday(.wide).day().month(.wide)))
@@ -428,12 +468,15 @@ struct ChannelPane: View {
                     Image(systemName: "chevron.left")
                 }
                 .disabled(windowStart <= Self.currentWindowStart(for: Date()))
+                .focused(focus, equals: .control(3))
                 Button("Now") { windowStart = Self.currentWindowStart(for: Date()) }
+                    .focused(focus, equals: .control(4))
                 Button {
                     windowStart = windowStart.addingTimeInterval(Self.step)
                 } label: {
                     Image(systemName: "chevron.right")
                 }
+                .focused(focus, equals: .control(5))
             }
         }
         .padding(.horizontal, 20)
