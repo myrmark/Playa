@@ -113,3 +113,62 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.filipmalmberg.Playa
         PRODUCT_NAME: Playa
         ASSETCATALOG_COMPILER_APPICON_NAME: "App Icon & Top Shelf Image"
+  PlayaiOS:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: iOS
+      # Stores and the player wrapper are shared with the Mac and Apple TV apps.
+      - path: Sources/Playa/PlaylistStore.swift
+        group: Shared
+      - path: Sources/Playa/EPGStore.swift
+        group: Shared
+      - path: Sources/Playa/ResumeStore.swift
+        group: Shared
+      - path: Sources/Playa/MPVPlayer.swift
+        group: Shared
+      - path: Sources/Playa/Storage.swift
+        group: Shared
+      - path: Sources/Playa/Vault.swift
+        group: Shared
+      - path: Sources/Playa/CloudSync.swift
+        group: Shared
+    dependencies:
+      - package: Playa
+        product: PlayaCore
+      - package: MPVKit
+        product: MPVKit
+    info:
+      path: iOS/Info.plist
+      properties:
+        CFBundleDisplayName: Playa
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        ITSAppUsesNonExemptEncryption: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # Most IPTV providers serve playlists and streams over plain http.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+    entitlements:
+      path: iOS/PlayaiOS.entitlements
+      properties:
+        com.apple.developer.ubiquity-kvstore-identifier: $(TeamIdentifierPrefix)com.filipmalmberg.Playa
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.filipmalmberg.Playa
+    settings:
+      groups: [shared]
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.filipmalmberg.Playa
+        PRODUCT_NAME: Playa
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

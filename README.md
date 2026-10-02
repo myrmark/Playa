@@ -61,6 +61,10 @@ Playlists, favourites, lists, recently watched, hidden groups and resume positio
 
 `Playa.app/Contents/MacOS/Playa --diagnose` prints the storage and sync state.
 
+## iPhone and iPad
+
+The iPhone and iPad version is in `iOS/`, built from the same project with the **PlayaiOS** scheme. It has the same sections as the Apple TV app with a touch interface: swipe a channel to favourite it, touch and hold for lists, and drag to rearrange a list.
+
 ## Using it
 
 1. Click **+** in the toolbar and paste your M3U URL, or choose a `.m3u` file.
@@ -98,6 +102,7 @@ Playlist addresses usually contain your provider login, and so does every stream
 | `Sources/PlayaCore` | Playlist, guide and series parsing. No UI; covered by tests. |
 | `Sources/Playa` | The Mac app, plus the stores, sync and mpv player wrapper shared with Apple TV. |
 | `tvOS` | The Apple TV interface. |
+| `iOS` | The iPhone and iPad interface. |
 | `project.yml` | Describes the Xcode project for both apps. `Package.swift` covers the shared core, its tests and a quick `swift build` of the Mac sources. |
 | `Support` | `Info.plist`, the icon and the script that draws it. |
 

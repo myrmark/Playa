@@ -1,8 +1,9 @@
 #!/bin/bash
-# Builds the Mac and Apple TV apps for the App Store.
+# Builds the Mac, Apple TV and iPhone/iPad apps for the App Store.
 #
-#   ./appstore.sh          archive both and export the packages into .build/appstore
-#   ./appstore.sh upload   archive both and upload them to App Store Connect
+#   ./appstore.sh                  archive all three and export the packages into .build/appstore
+#   ./appstore.sh upload           archive all three and upload them to App Store Connect
+#   ./appstore.sh upload PlayaiOS  the same for just the named schemes (PlayaMac, PlayaTV, PlayaiOS)
 #
 # Needs Local.xcconfig (DEVELOPMENT_TEAM = XXXXXXXXXX) and Local.env with an App Store Connect
 # API key (PLAYA_ASC_KEY_ID, PLAYA_ASC_ISSUER_ID); the key file itself belongs in
@@ -39,8 +40,14 @@ cat > "$WORK/ExportOptions.plist" <<PLIST
 PLIST
 
 xcodegen generate --quiet
-for SCHEME in PlayaMac PlayaTV; do
-    PLATFORM=$([ "$SCHEME" = "PlayaTV" ] && echo "generic/platform=tvOS" || echo "generic/platform=macOS")
+SCHEMES=("${@:2}")
+[ ${#SCHEMES[@]} -gt 0 ] || SCHEMES=(PlayaMac PlayaTV PlayaiOS)
+for SCHEME in "${SCHEMES[@]}"; do
+    case "$SCHEME" in
+        PlayaTV) PLATFORM="generic/platform=tvOS" ;;
+        PlayaiOS) PLATFORM="generic/platform=iOS" ;;
+        *) PLATFORM="generic/platform=macOS" ;;
+    esac
     echo "== $SCHEME: archive"
     xcodebuild -project Playa.xcodeproj -scheme "$SCHEME" -configuration Release -destination "$PLATFORM" \
         -derivedDataPath .build/xcode -archivePath "$WORK/$SCHEME.xcarchive" CURRENT_PROJECT_VERSION="$BUILD" \

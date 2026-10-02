@@ -1,4 +1,5 @@
-// Draws the Apple TV icon and top-shelf images into tvOS/Assets.xcassets.
+// Draws the Apple TV icon and top-shelf images into tvOS/Assets.xcassets, and the
+// iPhone and iPad icon into iOS/Assets.xcassets.
 // tvOS icons are layered so they shift with the remote: sky and sea at the back,
 // the sun in the middle and the play triangle in front.
 // Run from the repository root: swift Support/make-tv-icon.swift
@@ -156,4 +157,14 @@ try imageSet(at: brand.appendingPathComponent("Top Shelf Image.imageset"), layer
 try imageSet(at: brand.appendingPathComponent("Top Shelf Image Wide.imageset"), layer: .flat, width: 2320, height: 720, scales: [1, 2])
 
 try draw(.flat, width: 1280, height: 768).write(to: URL(fileURLWithPath: "Support/TVIcon.png"))
+
+// The iPhone and iPad icon is the same scene as one square, opaque image; the system rounds its corners.
+let iosIcon = URL(fileURLWithPath: "iOS/Assets.xcassets/AppIcon.appiconset")
+try? fileManager.removeItem(at: URL(fileURLWithPath: "iOS/Assets.xcassets"))
+try write(["info": info], to: URL(fileURLWithPath: "iOS/Assets.xcassets"))
+try write([
+    "images": [["filename": "icon.png", "idiom": "universal", "platform": "ios", "size": "1024x1024"]],
+    "info": info,
+], to: iosIcon)
+try draw(.flat, width: 1024, height: 1024).write(to: iosIcon.appendingPathComponent("icon.png"))
 print("Wrote tvOS/Assets.xcassets")

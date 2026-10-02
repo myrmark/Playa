@@ -18,6 +18,8 @@ enum CloudSync {
 
     #if os(tvOS)
     private static let platform = "Apple TV"
+    #elseif os(iOS)
+    private static let platform = "iPhone or iPad"
     #else
     private static let platform = "Mac"
     #endif
@@ -31,7 +33,7 @@ enum CloudSync {
 
     /// When Playa last started on each kind of device, as far as this device has heard.
     static var lastSeen: String {
-        ["Mac", "Apple TV"].map { name in
+        ["Mac", "Apple TV", "iPhone or iPad"].map { name in
             let stamp = store.double(forKey: "lastSeen \(name)")
             return "\(name) " + (stamp == 0 ? "never" : Date(timeIntervalSince1970: stamp).formatted(date: .omitted, time: .standard))
         }.joined(separator: ", ")
