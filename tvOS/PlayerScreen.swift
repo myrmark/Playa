@@ -315,10 +315,19 @@ struct PlayerScreen: View {
     /// its settings. Kept across channel changes, so the screen doesn't switch back and forth.
     private func matchScreen(to fps: Double) {
         guard fps > 0, UserDefaults.standard.bool(forKey: Self.matchRateKey) else { return }
+        // The request names a dynamic range as well as a rate. Naming plain SDR makes an Apple TV
+        // that runs in HDR drop out of it, and the TV then shows its SDR picture settings, so
+        // describe the video as the range the screen is already in.
+        let isHDR = UIScreen.main.potentialEDRHeadroom > 1
+        let extensions: [CFString: Any]? = isHDR ? [
+            kCMFormatDescriptionExtension_ColorPrimaries: kCMFormatDescriptionColorPrimaries_ITU_R_2020,
+            kCMFormatDescriptionExtension_TransferFunction: kCMFormatDescriptionTransferFunction_SMPTE_ST_2084_PQ,
+            kCMFormatDescriptionExtension_YCbCrMatrix: kCMFormatDescriptionYCbCrMatrix_ITU_R_2020,
+        ] : nil
         var format: CMFormatDescription?
         CMVideoFormatDescriptionCreate(
-            allocator: nil, codecType: kCMVideoCodecType_H264, width: 1920, height: 1080,
-            extensions: nil, formatDescriptionOut: &format)
+            allocator: nil, codecType: isHDR ? kCMVideoCodecType_HEVC : kCMVideoCodecType_H264, width: 1920, height: 1080,
+            extensions: extensions as CFDictionary?, formatDescriptionOut: &format)
         guard let format else { return }
         // Interlaced 25 and 30 fps streams are shown at twice their frame rate.
         let rate = fps < 31 && fps > 24.5 ? fps * 2 : fps

@@ -66,7 +66,7 @@ struct SettingsView: View {
                 Section {
                     Toggle("Match the screen's refresh rate to the channel", isOn: $matchesRate)
                 } footer: {
-                    Text("Shows 50 fps channels at 50 Hz, which makes movement smoother. It also needs Match Frame Rate turned on in the Apple TV's own Video and Audio settings. The screen goes black for a moment when it switches, and on some TVs colours look different afterwards.")
+                    Text("Shows 50 fps channels at 50 Hz, which makes movement smoother. It also needs Match Frame Rate turned on in the Apple TV's own Video and Audio settings. The screen goes black for a moment when it switches.")
                 }
 
                 Section {
