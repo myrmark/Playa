@@ -5,6 +5,7 @@ struct SettingsView: View {
     @EnvironmentObject private var store: PlaylistStore
     @EnvironmentObject private var epg: EPGStore
     @AppStorage(MPVPlayer.autoReconnectKey) private var autoReconnect = false
+    @AppStorage(PlayerScreen.panelOpacityKey) private var panelOpacity = PlayerScreen.defaultPanelOpacity
     @State private var playlistToRemove: SavedPlaylist?
 
     var body: some View {
@@ -59,6 +60,16 @@ struct SettingsView: View {
                     Toggle("Reconnect automatically when a live channel drops", isOn: $autoReconnect)
                 } footer: {
                     Text("Off by default. Many providers allow only one stream per subscription and may ban accounts that open a second one. With this on, Playa can reopen a stream while another device is already watching.")
+                }
+
+                Section {
+                    Picker("Channel list over the picture", selection: $panelOpacity) {
+                        ForEach([20, 30, 40, 50, 60, 70, 80, 90, 100], id: \.self) { percent in
+                            Text(percent == 100 ? "Solid" : "\(100 - percent)% see-through").tag(percent)
+                        }
+                    }
+                } footer: {
+                    Text("Swipe down or press select while watching to open the channel list. This sets how much of the picture shows through it.")
                 }
 
                 Section {

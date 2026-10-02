@@ -28,7 +28,12 @@ struct PlayerScreen: View {
     /// The channel list drawn over the picture, so the guide can be read without leaving playback.
     @State private var showsPanel = false
     @FocusState private var panelFocus: Int?
+    @AppStorage(PlayerScreen.panelOpacityKey) private var panelOpacity = PlayerScreen.defaultPanelOpacity
     @State private var watchTask: Task<Void, Never>?
+
+    /// How solid the channel panel is, in percent; lower lets more of the picture through.
+    static let panelOpacityKey = "panelOpacity"
+    static let defaultPanelOpacity = 70
 
     private var channel: Channel { session.channels[index] }
     private var isLive: Bool { channel.kind == .live }
@@ -75,8 +80,10 @@ struct PlayerScreen: View {
         }
         .onMoveCommand { direction in
             switch direction {
-            case .up where isLive: zap(-1)
-            case .down where isLive: zap(1)
+            // Swiping down brings up the channel list, as select does.
+            case .down: withAnimation { showsPanel = true }
+            case .left where isLive: zap(-1)
+            case .right where isLive: zap(1)
             case .left where !isLive: seek(by: -15)
             case .right where !isLive: seek(by: 15)
             default: flashInfo()
@@ -136,7 +143,7 @@ struct PlayerScreen: View {
             .padding(.vertical, 40)
             // Clear of the screen edge, which TVs often crop.
             .padding(.leading, 50)
-            .background(.regularMaterial)
+            .background(Color.black.opacity(Double(panelOpacity) / 100))
             Spacer(minLength: 0)
         }
         .ignoresSafeArea()
@@ -213,7 +220,8 @@ struct PlayerScreen: View {
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
-                Text(hasTrackChoices ? "Press select for channels, audio and subtitles" : "Press select for channels")
+                Text((hasTrackChoices ? "Swipe down for channels, audio and subtitles" : "Swipe down for channels")
+                    + (isLive ? "  ·  left and right change channel" : ""))
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
@@ -313,6 +321,8 @@ private struct PanelRow: View {
                 }
             }
         }
+        // Keeps the text readable when the panel is mostly transparent.
+        .shadow(color: .black.opacity(0.8), radius: 4)
     }
 }
 
