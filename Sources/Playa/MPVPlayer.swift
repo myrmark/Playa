@@ -52,6 +52,9 @@ final class MPVPlayer: ObservableObject {
     private var latestLoadToken = 0
     /// Whether a stream may be open in mpv; command queue only.
     private var streamOpen = false
+    /// Whether the aspect ratio currently carries the resize nudge; command queue only.
+    private var aspectNudged = false
+    private var resizeWork: DispatchWorkItem?
 
     // Reconnect bookkeeping; main thread only.
     private var currentURL: String?
@@ -94,6 +97,7 @@ final class MPVPlayer: ObservableObject {
         mpv_set_option_string(mpv, "load-context-menu", "no")
         mpv_set_option_string(mpv, "load-positioning", "no")
         mpv_initialize(mpv)
+        videoLayer.onResize = { [weak self] in self?.surfaceResized() }
 
         // PLAYA_MPV_LOG=v (or debug) prints mpv's own log to stderr when run from a terminal.
         mpv_request_log_messages(mpv, ProcessInfo.processInfo.environment["PLAYA_MPV_LOG"] ?? "warn")
@@ -151,6 +155,9 @@ final class MPVPlayer: ObservableObject {
             }
             // Zapping quickly through channels opens only the one that was landed on.
             guard self.latestLoad.withLock({ self.latestLoadToken }) == token else { return }
+            // The resize nudge belongs to the previous stream's aspect ratio.
+            mpv_set_property_string(self.mpv, "video-aspect-override", "-1")
+            self.aspectNudged = false
             if let start {
                 self.run(["loadfile", url, "replace", "-1", "start=\(Int(start))"])
             } else {
@@ -159,6 +166,32 @@ final class MPVPlayer: ObservableObject {
             self.streamOpen = true
             mpv_set_property_string(self.mpv, "pause", "no")
         }
+    }
+
+    /// mpv's Metal output only reads the layer's size when the video output is reconfigured,
+    /// which normally happens once per stream. After a window resize or a device rotation it
+    /// would keep laying the picture out for the old size, leaving it small in one corner.
+    ///
+    /// Reconfiguring needs the picture's parameters to change, so this nudges the aspect ratio
+    /// by a hundredth of a percent, or back again. The difference is far below a pixel.
+    private func surfaceResized() {
+        resizeWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            if self.aspectNudged {
+                mpv_set_property_string(self.mpv, "video-aspect-override", "-1")
+                self.aspectNudged = false
+                return
+            }
+            var aspect = 0.0
+            // No picture yet: the stream will be laid out for the current size when it starts.
+            guard mpv_get_property(self.mpv, "video-params/aspect", MPV_FORMAT_DOUBLE, &aspect) >= 0, aspect > 0 else { return }
+            mpv_set_property_string(self.mpv, "video-aspect-override", String(format: "%.6f", aspect * 1.0001))
+            self.aspectNudged = true
+        }
+        resizeWork = work
+        // A window being dragged changes size continuously; act once it settles.
+        queue.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
     func togglePause() {
@@ -318,13 +351,17 @@ final class MPVPlayer: ObservableObject {
 }
 
 final class VideoLayer: CAMetalLayer {
+    /// Called when the drawable really changes size: a window resize or a device rotation.
+    var onResize: (() -> Void)?
+
     // MoltenVK briefly sets the drawable to 1x1 to flush a presentation, which makes the
     // picture flicker and can leave it stuck at that size. See mpv-player/mpv#13651.
     override var drawableSize: CGSize {
         get { super.drawableSize }
         set {
-            if newValue.width > 1, newValue.height > 1 {
+            if newValue.width > 1, newValue.height > 1, newValue != super.drawableSize {
                 super.drawableSize = newValue
+                onResize?()
             }
         }
     }
