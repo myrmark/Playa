@@ -26,6 +26,9 @@ final class AppLock: ObservableObject {
         pin?.secondsUntilNextAttempt() ?? 0
     }
 
+    /// The number of digits in the PIN, if known.
+    var pinLength: Int? { pin?.length }
+
     func lock() {
         if isEnabled { isLocked = true }
     }

@@ -41,6 +41,10 @@ struct LockScreen: View {
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { isFocused = true }
+        // The last digit unlocks, without a press on the button.
+        .onChange(of: entry) { _, value in
+            if value.count == lock.pinLength { unlock() }
+        }
     }
 
     private func unlock() {

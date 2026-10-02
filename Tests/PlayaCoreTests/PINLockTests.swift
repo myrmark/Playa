@@ -41,4 +41,19 @@ final class PINLockTests: XCTestCase {
         XCTAssertTrue(decoded.verify("987654"))
         XCTAssertNotEqual(try JSONEncoder().encode(XCTUnwrap(PINLock(pin: "987654"))), data, "each PIN gets its own salt")
     }
+
+    func testLearnsLengthOfPINsStoredWithoutIt() throws {
+        let fresh = try XCTUnwrap(PINLock(pin: "471100"))
+        XCTAssertEqual(fresh.length, 6)
+
+        // A PIN saved before the length was recorded.
+        var fields = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(fresh)) as? [String: Any])
+        fields["length"] = nil
+        var old = try JSONDecoder().decode(PINLock.self, from: JSONSerialization.data(withJSONObject: fields))
+        XCTAssertNil(old.length)
+        XCTAssertFalse(old.verify("000000"))
+        XCTAssertNil(old.length, "a wrong guess reveals nothing")
+        XCTAssertTrue(old.verify("471100"))
+        XCTAssertEqual(old.length, 6)
+    }
 }

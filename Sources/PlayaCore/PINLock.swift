@@ -10,6 +10,9 @@ public struct PINLock: Codable, Equatable, Sendable {
     public private(set) var failures = 0
     /// While this is in the future, no attempt is accepted.
     public private(set) var lockedUntil: Date?
+    /// How many digits the PIN has, so entry can finish by itself on the last one.
+    /// Missing for PINs set before this was recorded, until they are next entered correctly.
+    public private(set) var length: Int?
 
     /// Wrong guesses allowed before a pause is imposed.
     public static let freeAttempts = 3
@@ -26,6 +29,7 @@ public struct PINLock: Codable, Equatable, Sendable {
         let salt = Data((0..<16).map { _ in UInt8.random(in: .min ... .max, using: &generator) })
         self.salt = salt
         self.hash = Self.digest(pin, salt: salt)
+        self.length = pin.count
     }
 
     private static func digest(_ pin: String, salt: Data) -> Data {
@@ -48,6 +52,7 @@ public struct PINLock: Codable, Equatable, Sendable {
         if Self.digest(pin, salt: salt) == hash {
             failures = 0
             lockedUntil = nil
+            length = pin.count
             return true
         }
         failures += 1
