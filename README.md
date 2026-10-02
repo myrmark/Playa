@@ -51,6 +51,16 @@ This builds `Playa.app` in the repository folder and launches it. Run the tests 
 | ⌘G | Show the TV guide |
 | Double-click the video | Full screen |
 
+## One stream at a time
+
+Many IPTV providers allow a single stream per subscription and may ban accounts that open a second one. Playa is built not to do that by accident:
+
+- It never starts a stream by itself. On launch the last channel is selected, but nothing plays until you press play.
+- When you switch channels, the old stream is closed before the new one is opened, with a short pause in between.
+- It does not reconnect a dropped channel automatically; it shows a **Reconnect** button instead.
+
+Auto-play on launch and automatic reconnect can be turned on in **Settings** (⌘,) if your provider allows it. Playa cannot know what your other devices are doing, so watching on two devices at once is still up to you to avoid.
+
 ## Privacy
 
 Playlist addresses usually contain your provider login. Playa keeps them on your Mac, in its preferences and in `~/Library/Application Support/Playa`, and only contacts the addresses in your playlist.

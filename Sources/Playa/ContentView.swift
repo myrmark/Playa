@@ -13,6 +13,10 @@ struct ContentView: View {
     @StateObject private var store = PlaylistStore()
     @StateObject private var epg = EPGStore()
     @StateObject private var resume = ResumeStore()
+    @AppStorage(SettingsView.autoplayKey) private var autoplayOnLaunch = false
+    /// The last channel is selected at launch but not played until the user asks: starting a
+    /// stream unprompted could be a second one on a single-stream subscription.
+    @State private var holdsPlayback = false
     /// Advances once a minute so now/next labels follow the clock.
     @State private var now = Date()
 
@@ -41,6 +45,8 @@ struct ContentView: View {
             PlayerPane(
                 channel: selectedChannel,
                 resume: resume,
+                isHeld: holdsPlayback,
+                release: { holdsPlayback = false },
                 playlistError: store.errorMessage,
                 zap: zap,
                 spaceTogglesPause: !isSearching,
@@ -101,6 +107,7 @@ struct ContentView: View {
                 showingPlaylistSheet = true
             } else if let last = store.lastChannelURL,
                       let channel = store.playlist.channels.first(where: { $0.url == last }) {
+                holdsPlayback = !autoplayOnLaunch
                 selectedChannel = channel
             }
         }
@@ -140,7 +147,9 @@ struct ContentView: View {
             openShow = nil
             updateVisibleChannels(in: store.playlist, favourites: store.favourites, afterTyping: !searchText.isEmpty)
         }
-        .onChange(of: selectedChannel) { _, channel in
+        .onChange(of: selectedChannel) { old, channel in
+            // Picking a different channel is the user asking to play.
+            if let old, old.url != channel?.url { holdsPlayback = false }
             if let channel { store.lastChannelURL = channel.url }
         }
     }
@@ -422,6 +431,9 @@ private extension ChannelKind {
 private struct PlayerPane: View {
     let channel: Channel?
     let resume: ResumeStore
+    /// While held, the selected channel is shown but no stream is opened.
+    let isHeld: Bool
+    let release: () -> Void
     let playlistError: String?
     let zap: (Int) -> Void
     /// Off while the search field has focus, so a space can be typed there.
@@ -445,11 +457,24 @@ private struct PlayerPane: View {
                 Text("Choose a channel")
                     .font(.title2)
                     .foregroundStyle(.secondary)
+            } else if isHeld, let channel {
+                Button(action: release) {
+                    Label("Play \(channel.name)", systemImage: "play.fill")
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                }
+                .controlSize(.large)
+                .buttonStyle(.borderedProminent)
             } else if let error = player.errorMessage ?? playlistError {
-                Text(error)
-                    .padding()
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-                    .padding()
+                VStack(spacing: 10) {
+                    Text(error)
+                    if player.canRetry {
+                        Button("Reconnect") { player.retry() }
+                    }
+                }
+                .padding()
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                .padding()
             } else if player.isReconnecting {
                 VStack(spacing: 10) {
                     ProgressView()
@@ -467,19 +492,21 @@ private struct PlayerPane: View {
             controls
         }
         // Keyed on the stream, so a playlist refresh that renumbers channels doesn't restart playback.
-        .onChange(of: channel?.url, initial: true) { _, _ in
-            savePosition(isFinal: true)
-            playing = channel
-            if let channel {
-                player.play(url: channel.url, startAt: resume.resumePosition(for: channel), isLive: channel.kind == .live)
-            }
-        }
+        .onChange(of: channel?.url, initial: true) { _, _ in startPlayback() }
+        .onChange(of: isHeld) { _, _ in startPlayback() }
         .onChange(of: player.position) { _, position in
             if Int(position) % 10 == 0, position > 0 { savePosition(isFinal: false) }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             savePosition(isFinal: true)
         }
+    }
+
+    private func startPlayback() {
+        guard !isHeld, let channel, channel.url != playing?.url else { return }
+        savePosition(isFinal: true)
+        playing = channel
+        player.play(url: channel.url, startAt: resume.resumePosition(for: channel), isLive: channel.kind == .live)
     }
 
     private func savePosition(isFinal: Bool) {
@@ -574,9 +601,9 @@ private struct PlayerPane: View {
     private var controlRow: some View {
         HStack(spacing: 14) {
             Button {
-                player.togglePause()
+                if isHeld { release() } else { player.togglePause() }
             } label: {
-                Image(systemName: player.isPaused ? "play.fill" : "pause.fill")
+                Image(systemName: player.isPaused || isHeld ? "play.fill" : "pause.fill")
                     .frame(width: 20)
             }
             .keyboardShortcut(spaceTogglesPause ? KeyboardShortcut(.space, modifiers: []) : nil)

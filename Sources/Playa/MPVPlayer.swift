@@ -20,6 +20,8 @@ final class MPVPlayer: ObservableObject {
     @Published var errorMessage: String?
     /// True while a dropped live stream is being reopened.
     @Published private(set) var isReconnecting = false
+    /// True when a live stream stopped and can be reopened by hand.
+    @Published private(set) var canRetry = false
     /// Audio and subtitle tracks of the current stream.
     @Published private(set) var tracks: [Track] = []
     /// Playback position and length in seconds. `duration` is 0 when unknown (live TV).
@@ -37,6 +39,18 @@ final class MPVPlayer: ObservableObject {
     /// stream, so they never run on the main thread.
     private let queue = DispatchQueue(label: "mpv-commands", qos: .userInitiated)
     fileprivate var renderContext: OpaquePointer?
+
+    static let autoReconnectKey = "autoReconnect"
+    /// Pause between closing one stream and opening the next. mpv closes the old connection
+    /// first, but only milliseconds ahead; a provider that counts connections with any lag
+    /// could see two streams on a single-stream subscription.
+    private static let switchGap: TimeInterval = 0.7
+
+    /// Number of the most recently requested load, read on the command queue to skip superseded ones.
+    private let latestLoad = NSLock()
+    private var latestLoadToken = 0
+    /// Whether a stream may be open in mpv; command queue only.
+    private var streamOpen = false
 
     // Reconnect bookkeeping; main thread only.
     private var currentURL: String?
@@ -93,18 +107,38 @@ final class MPVPlayer: ObservableObject {
         load(url, startAt: start)
     }
 
+    /// Reopens a live stream that stopped.
+    func retry() {
+        guard let url = currentURL else { return }
+        retries = 0
+        load(url, startAt: nil)
+    }
+
     private func load(_ url: String, startAt start: Double?) {
         loadToken += 1
+        canRetry = false
         errorMessage = nil
         isBuffering = true
         position = 0
         duration = 0
-        if let start {
-            command(["loadfile", url, "replace", "-1", "start=\(Int(start))"])
-        } else {
-            command(["loadfile", url])
+        let token = loadToken
+        latestLoad.withLock { latestLoadToken = token }
+        queue.async {
+            if self.streamOpen {
+                self.run(["stop"])
+                self.streamOpen = false
+                Thread.sleep(forTimeInterval: Self.switchGap)
+            }
+            // Zapping quickly through channels opens only the one that was landed on.
+            guard self.latestLoad.withLock({ self.latestLoadToken }) == token else { return }
+            if let start {
+                self.run(["loadfile", url, "replace", "-1", "start=\(Int(start))"])
+            } else {
+                self.run(["loadfile", url])
+            }
+            self.streamOpen = true
+            mpv_set_property_string(self.mpv, "pause", "no")
         }
-        queue.async { mpv_set_property_string(self.mpv, "pause", "no") }
     }
 
     func togglePause() {
@@ -118,7 +152,10 @@ final class MPVPlayer: ObservableObject {
 
     func stop() {
         currentURL = nil
-        command(["stop"])
+        queue.async {
+            self.run(["stop"])
+            self.streamOpen = false
+        }
     }
 
     func selectAudio(_ track: Track) {
@@ -134,15 +171,18 @@ final class MPVPlayer: ObservableObject {
     /// Called on the main thread when the stream stopped by itself, with an error or by running dry.
     private func playbackEnded(message: String) {
         guard let url = currentURL else { return }
-        // Providers often allow one stream at a time. If another device takes it, each reconnect
-        // here is cut off again within seconds; counting only stable playback as success makes
-        // Playa give up after a few tries instead of fighting that device forever.
+        // Many providers allow one stream per subscription and ban accounts that open two. A stream
+        // often drops precisely because another device started watching, so reopening it without
+        // being asked could put a second stream on the account. Reconnecting is therefore opt-in.
+        let reconnects = UserDefaults.standard.bool(forKey: Self.autoReconnectKey)
+        // Only stable playback counts as a successful reconnect, so repeated cut-offs still end.
         if hasStarted, Date().timeIntervalSince(lastStart) > 60 { retries = 0 }
         // A channel that never started gets one more try; one that was playing gets several.
         let limit = hasStarted ? 5 : 1
-        guard isLive, retries < limit else {
+        guard isLive, reconnects, retries < limit else {
             isReconnecting = false
             isBuffering = false
+            canRetry = isLive
             if isLive || !hasStarted { errorMessage = message }
             return
         }
@@ -189,13 +229,16 @@ final class MPVPlayer: ObservableObject {
     }
 
     private func command(_ arguments: [String]) {
-        queue.async {
-            let strings = arguments.map { strdup($0) }
-            var argv: [UnsafePointer<CChar>?] = strings.map { UnsafePointer($0) }
-            argv.append(nil)
-            mpv_command(self.mpv, &argv)
-            strings.forEach { free($0) }
-        }
+        queue.async { self.run(arguments) }
+    }
+
+    /// Runs an mpv command synchronously; call on the command queue.
+    private func run(_ arguments: [String]) {
+        let strings = arguments.map { strdup($0) }
+        var argv: [UnsafePointer<CChar>?] = strings.map { UnsafePointer($0) }
+        argv.append(nil)
+        mpv_command(mpv, &argv)
+        strings.forEach { free($0) }
     }
 
     private func handle(_ event: mpv_event) {

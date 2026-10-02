@@ -11,6 +11,10 @@ struct PlayaApp: App {
                 .frame(minWidth: 900, minHeight: 520)
         }
         .defaultSize(width: 1280, height: 760)
+
+        Settings {
+            SettingsView()
+        }
     }
 }
 
