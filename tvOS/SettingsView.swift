@@ -5,6 +5,7 @@ struct SettingsView: View {
     @EnvironmentObject private var store: PlaylistStore
     @EnvironmentObject private var epg: EPGStore
     @AppStorage(MPVPlayer.autoReconnectKey) private var autoReconnect = false
+    @AppStorage(PlayerScreen.matchRateKey) private var matchesRate = false
     @AppStorage(PlayerScreen.panelOpacityKey) private var panelOpacity = PlayerScreen.defaultPanelOpacity
     @State private var playlistToRemove: SavedPlaylist?
 
@@ -60,6 +61,12 @@ struct SettingsView: View {
                     Toggle("Reconnect automatically when a live channel drops", isOn: $autoReconnect)
                 } footer: {
                     Text("Off by default. Many providers allow only one stream per subscription and may ban accounts that open a second one. With this on, Playa can reopen a stream while another device is already watching.")
+                }
+
+                Section {
+                    Toggle("Match the screen's refresh rate to the channel", isOn: $matchesRate)
+                } footer: {
+                    Text("Shows 50 fps channels at 50 Hz, which makes movement smoother. It also needs Match Frame Rate turned on in the Apple TV's own Video and Audio settings. The screen goes black for a moment when it switches, and on some TVs colours look different afterwards.")
                 }
 
                 Section {

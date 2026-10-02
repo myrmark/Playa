@@ -35,6 +35,8 @@ struct PlayerScreen: View {
     @State private var showsHealth = false
 
     /// How solid the channel panel is, in percent; lower lets more of the picture through.
+    /// Off unless chosen: on some TVs the switch of mode also changes how colours look.
+    static let matchRateKey = "matchRefreshRate"
     static let panelOpacityKey = "panelOpacity"
     static let defaultPanelOpacity = 70
 
@@ -312,7 +314,7 @@ struct PlayerScreen: View {
     /// stutter of being fitted into 60 Hz. tvOS acts on it only when Match Frame Rate is on in
     /// its settings. Kept across channel changes, so the screen doesn't switch back and forth.
     private func matchScreen(to fps: Double) {
-        guard fps > 0 else { return }
+        guard fps > 0, UserDefaults.standard.bool(forKey: Self.matchRateKey) else { return }
         var format: CMFormatDescription?
         CMVideoFormatDescriptionCreate(
             allocator: nil, codecType: kCMVideoCodecType_H264, width: 1920, height: 1080,
