@@ -1,0 +1,9 @@
+.build/
+.swiftpm/
+LaPlaya.app/
+*.xcodeproj
+xcuserdata/
+.DS_Store
+# Playlists contain provider credentials
+*.m3u
+*.m3u8
