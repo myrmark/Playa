@@ -8,6 +8,7 @@ struct GuideView: View {
     let guide: Guide
     let favourites: Set<String>
     let lists: [ChannelList]
+    let hiddenGroups: Set<String>
     let now: Date
     let playingChannel: Channel?
     let onPlay: (Channel) -> Void
@@ -24,13 +25,15 @@ struct GuideView: View {
     private static let step: TimeInterval = 2 * 3600
 
     init(
-        playlist: Playlist, guide: Guide, favourites: Set<String>, lists: [ChannelList], now: Date, initialFilter: ChannelFilter,
+        playlist: Playlist, guide: Guide, favourites: Set<String>, lists: [ChannelList], hiddenGroups: Set<String>, now: Date,
+        initialFilter: ChannelFilter,
         playingChannel: Channel?, onPlay: @escaping (Channel) -> Void, onClose: @escaping () -> Void
     ) {
         self.playlist = playlist
         self.guide = guide
         self.favourites = favourites
         self.lists = lists
+        self.hiddenGroups = hiddenGroups
         self.now = now
         self.playingChannel = playingChannel
         self.onPlay = onPlay
@@ -87,7 +90,7 @@ struct GuideView: View {
         rows = playlist.channels.filter { channel in
             guard channel.kind == .live else { return false }
             switch filter {
-            case .all: break
+            case .all: guard !hiddenGroups.contains(PlaylistStore.hiddenKey(group: channel.group, kind: .live)) else { return false }
             case .favourites: guard favourites.contains(channel.key) else { return false }
             case .list: guard members.contains(channel.key) else { return false }
             case .group(let group): guard channel.group == group else { return false }
@@ -116,7 +119,7 @@ struct GuideView: View {
                     Label(list.name, systemImage: "list.bullet").tag(ChannelFilter.list(list.id))
                 }
                 Divider()
-                ForEach(playlist.groupsByKind[.live] ?? [], id: \.self) { group in
+                ForEach((playlist.groupsByKind[.live] ?? []).filter { !hiddenGroups.contains(PlaylistStore.hiddenKey(group: $0, kind: .live)) }, id: \.self) { group in
                     Text(group).tag(ChannelFilter.group(group))
                 }
             }

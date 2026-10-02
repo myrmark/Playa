@@ -1,3 +1,4 @@
+import PlayaCore
 import SwiftUI
 
 struct SettingsView: View {
@@ -27,6 +28,18 @@ struct SettingsView: View {
                         }
                     }
                     NavigationLink("Add Playlist…") { AddPlaylistView() }
+                    NavigationLink {
+                        GroupSettings()
+                    } label: {
+                        HStack {
+                            Text("Groups")
+                            Spacer()
+                            if !store.hiddenGroups.isEmpty {
+                                Text("\(store.hiddenGroups.count) hidden")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                     Button {
                         Task { await store.refresh() }
                     } label: {
@@ -76,6 +89,49 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+}
+
+/// Choose which of the playlist's groups to show.
+struct GroupSettings: View {
+    @EnvironmentObject private var store: PlaylistStore
+    @State private var kind = ChannelKind.live
+
+    private var groups: [String] { store.playlist.groupsByKind[kind] ?? [] }
+
+    private func isHidden(_ group: String) -> Bool {
+        store.hiddenGroups.contains(PlaylistStore.hiddenKey(group: group, kind: kind))
+    }
+
+    var body: some View {
+        List {
+            Section {
+                Picker("Section", selection: $kind) {
+                    ForEach(ChannelKind.allCases.filter { store.playlist.groupsByKind[$0] != nil }, id: \.self) { kind in
+                        Text(kind.title).tag(kind)
+                    }
+                }
+                Button("Show All") { store.setHidden(false, groups: groups, kind: kind) }
+                Button("Hide All") { store.setHidden(true, groups: groups, kind: kind) }
+            } footer: {
+                Text("Hidden groups disappear from the browser and from search. Channels you put in Favourites or a list stay there. \(groups.filter { !isHidden($0) }.count) of \(groups.count) shown.")
+            }
+            Section("Groups") {
+                ForEach(groups, id: \.self) { group in
+                    Button {
+                        store.setHidden(!isHidden(group), groups: [group], kind: kind)
+                    } label: {
+                        HStack {
+                            Text(group)
+                                .foregroundStyle(isHidden(group) ? .secondary : .primary)
+                            Spacer()
+                            if !isHidden(group) { Image(systemName: "checkmark") }
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Groups")
     }
 }
 

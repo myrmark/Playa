@@ -126,7 +126,9 @@ struct TwoPaneBrowser<Pane: View>: View {
         _startValue = AppStorage(wrappedValue: "", "startFilter.\(kind.rawValue)")
     }
 
-    private var groups: [String] { store.playlist.groupsByKind[kind] ?? [] }
+    /// The groups on show; hidden ones are left out.
+    private var groups: [String] { store.visibleGroups(kind) }
+    private var hasPlaylist: Bool { store.playlist.groupsByKind[kind] != nil }
 
     private var focusedFilter: ChannelFilter? {
         if case .filter(let filter) = focus { filter } else { nil }
@@ -144,7 +146,7 @@ struct TwoPaneBrowser<Pane: View>: View {
 
     var body: some View {
         Group {
-            if groups.isEmpty {
+            if !hasPlaylist {
                 PlaylistLoadingView()
             } else {
                 HStack(alignment: .top, spacing: 0) {
@@ -194,7 +196,9 @@ struct TwoPaneBrowser<Pane: View>: View {
     }
 
     private func openStartFilter() {
-        guard shown == nil, !groups.isEmpty else { return }
+        // A group that was just hidden can't stay open.
+        if case .group(let name) = shown, !groups.contains(name) { shown = nil }
+        guard shown == nil, hasPlaylist else { return }
         if let startFilter {
             shown = startFilter
             wantsFocusInPane = true
@@ -254,6 +258,10 @@ struct TwoPaneBrowser<Pane: View>: View {
             if let list {
                 Button("Rename…") { listEditor.request = .rename(list) }
                 Button("Delete List", role: .destructive) { listToDelete = list }
+            }
+            if case .group(let name) = filter {
+                // Hidden groups come back from Settings → Groups.
+                Button("Hide Group") { store.setHidden(true, groups: [name], kind: kind) }
             }
         }
     }

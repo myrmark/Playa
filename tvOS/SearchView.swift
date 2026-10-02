@@ -52,17 +52,20 @@ struct SearchView: View {
         // Wait for a pause in typing.
         try? await Task.sleep(for: .milliseconds(300))
         if Task.isCancelled { return }
-        let playlist = store.playlist, limit = Self.limit
+        let playlist = store.playlist, limit = Self.limit, hidden = store.hiddenGroups
         let result = await Task.detached(priority: .userInitiated) { () -> ([Channel], [SeriesShow]) in
             func matches(_ name: String) -> Bool {
                 name.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil
             }
             var channels: [Channel] = []
-            for channel in playlist.channels where channel.kind != .series && matches(channel.name) {
+            func isHidden(_ group: String, _ kind: ChannelKind) -> Bool {
+                !hidden.isEmpty && hidden.contains(PlaylistStore.hiddenKey(group: group, kind: kind))
+            }
+            for channel in playlist.channels where channel.kind != .series && !isHidden(channel.group, channel.kind) && matches(channel.name) {
                 channels.append(channel)
                 if channels.count == limit { break }
             }
-            let shows = Array(playlist.shows.lazy.filter { matches($0.name) }.prefix(limit))
+            let shows = Array(playlist.shows.lazy.filter { !isHidden($0.group, .series) && matches($0.name) }.prefix(limit))
             return (channels, shows)
         }.value
         if Task.isCancelled { return }

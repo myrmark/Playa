@@ -52,6 +52,7 @@ struct ContentView: View {
     @State private var listPrompt: ListPrompt?
     @State private var listName = ""
     @State private var listToDelete: ChannelList?
+    @State private var showingGroupChooser = false
 
     /// The list the sidebar is showing, if it is showing one.
     private var currentList: ChannelList? {
@@ -87,6 +88,7 @@ struct ContentView: View {
                     guide: epg.guide,
                     favourites: store.favourites,
                     lists: store.lists,
+                    hiddenGroups: store.hiddenGroups,
                     now: now,
                     initialFilter: guideStartFilter,
                     playingChannel: selectedChannel,
@@ -127,6 +129,16 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showingPlaylistSheet) {
             PlaylistSheet(store: store)
+        }
+        .sheet(isPresented: $showingGroupChooser) {
+            GroupChooser(store: store, kind: section)
+        }
+        .onReceive(store.$hiddenGroups) { hidden in
+            if case .group(let group) = filter, hidden.contains(PlaylistStore.hiddenKey(group: group, kind: section)) {
+                filter = .all
+            } else {
+                updateVisibleChannels(in: store.playlist, favourites: store.favourites, hidden: hidden)
+            }
         }
         .alert(
             { if case .rename = listPrompt { "Rename List" } else { "New List" } }(),
@@ -236,10 +248,14 @@ struct ContentView: View {
     /// Filters on a background thread: matching text against a provider-sized playlist
     /// takes long enough to make typing in the search field stutter.
     private func updateVisibleChannels(
-        in playlist: Playlist, favourites: Set<String>, lists: [ChannelList]? = nil, afterTyping: Bool = false
+        in playlist: Playlist, favourites: Set<String>, lists: [ChannelList]? = nil, hidden: Set<String>? = nil,
+        afterTyping: Bool = false
     ) {
         filterTask?.cancel()
         let section = section, filter = filter, searchText = searchText
+        // Only groups of this section matter, by name.
+        let prefix = PlaylistStore.hiddenKey(group: "", kind: section)
+        let hiddenGroups = Set((hidden ?? store.hiddenGroups).filter { $0.hasPrefix(prefix) }.map { String($0.dropFirst(prefix.count)) })
         var list: ChannelList?
         if case .list(let id) = filter { list = (lists ?? store.lists).first { $0.id == id } }
         filterTask = Task {
@@ -249,7 +265,10 @@ struct ContentView: View {
                 if Task.isCancelled { return }
             }
             let result = await Task.detached(priority: .userInitiated) {
-                Self.visibleItems(in: playlist, section: section, filter: filter, searchText: searchText, favourites: favourites, list: list)
+                Self.visibleItems(
+                    in: playlist, section: section, filter: filter, searchText: searchText,
+                    favourites: favourites, list: list, hiddenGroups: hiddenGroups
+                )
             }.value
             if Task.isCancelled { return }
             listGeneration += 1
@@ -260,7 +279,7 @@ struct ContentView: View {
 
     private nonisolated static func visibleItems(
         in playlist: Playlist, section: ChannelKind, filter: ChannelFilter, searchText: String, favourites: Set<String>,
-        list: ChannelList?
+        list: ChannelList?, hiddenGroups: Set<String>
     ) -> (channels: [Channel], shows: [SeriesShow]) {
         func matchesSearch(_ name: String) -> Bool {
             searchText.isEmpty || name.range(of: searchText, options: [.caseInsensitive, .diacriticInsensitive]) != nil
@@ -272,7 +291,7 @@ struct ContentView: View {
             // Series are browsed by show; the episode list comes from the open show.
             let shows = playlist.shows.filter { show in
                 switch filter {
-                case .all: break
+                case .all: guard !hiddenGroups.contains(show.group) else { return false }
                 case .favourites: guard favourites.contains(show.favouriteKey) else { return false }
                 case .list: guard members.contains(show.favouriteKey) else { return false }
                 case .group(let group): guard show.group == group else { return false }
@@ -284,13 +303,13 @@ struct ContentView: View {
             }
             return ([], shows)
         }
-        if filter == .all && searchText.isEmpty && playlist.countByKind.count <= 1 {
+        if filter == .all && searchText.isEmpty && playlist.countByKind.count <= 1 && hiddenGroups.isEmpty {
             return (playlist.channels, [])
         }
         let channels = playlist.channels.filter { channel in
             guard channel.kind == section else { return false }
             switch filter {
-            case .all: break
+            case .all: guard !hiddenGroups.contains(channel.group) else { return false }
             case .favourites: guard favourites.contains(channel.key) else { return false }
             case .list: guard members.contains(channel.key) else { return false }
             case .group(let group): guard channel.group == group else { return false }
@@ -378,13 +397,15 @@ struct ContentView: View {
                 }
                 Button("Delete “\(list.name)”…", role: .destructive) { listToDelete = list }
             }
+            Divider()
+            Button("Choose Groups…") { showingGroupChooser = true }
         } label: {
-            Image(systemName: "list.bullet")
+            Image(systemName: "ellipsis.circle")
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Lists")
+        .help("Lists and groups")
     }
 
     private var playlistMenu: some View {
@@ -493,13 +514,16 @@ struct ContentView: View {
 
             HStack(spacing: 8) {
                 Picker("Group", selection: $filter) {
-                    Text("\(section.allTitle) (\(section == .series ? store.playlist.shows.count : store.playlist.countByKind[section] ?? 0))").tag(ChannelFilter.all)
+                    // The total would be wrong once groups are hidden, so it is only shown when none are.
+                    Text(store.visibleGroups(section).count == (store.playlist.groupsByKind[section] ?? []).count
+                        ? "\(section.allTitle) (\(section == .series ? store.playlist.shows.count : store.playlist.countByKind[section] ?? 0))"
+                        : section.allTitle).tag(ChannelFilter.all)
                     Label("Favourites", systemImage: "star.fill").tag(ChannelFilter.favourites)
                     ForEach(store.lists) { list in
                         Label(list.name, systemImage: "list.bullet").tag(ChannelFilter.list(list.id))
                     }
                     Divider()
-                    ForEach(store.playlist.groupsByKind[section] ?? [], id: \.self) { group in
+                    ForEach(store.visibleGroups(section), id: \.self) { group in
                         Text(group).tag(ChannelFilter.group(group))
                     }
                 }
@@ -584,7 +608,7 @@ struct ContentView: View {
     }
 }
 
-private extension ChannelKind {
+extension ChannelKind {
     var title: String {
         switch self {
         case .live: "Live TV"

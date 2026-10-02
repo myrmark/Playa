@@ -23,6 +23,8 @@ final class PlaylistStore: ObservableObject {
     @Published var errorMessage: String?
     /// `Channel.key`s of starred channels and `SeriesShow.favouriteKey`s of starred shows.
     @Published private(set) var favourites: Set<String> = []
+    /// Groups the user doesn't want to see, as `hiddenKey(group:kind:)` values.
+    @Published private(set) var hiddenGroups: Set<String> = []
     /// Collections the user put together, in the order they were created.
     @Published private(set) var lists: [ChannelList] = []
 
@@ -54,6 +56,7 @@ final class PlaylistStore: ObservableObject {
     private static let maxCacheAge: TimeInterval = 24 * 3600
     private static let favouritesKey = "favourites"
     private static let listsKey = "lists"
+    private static let hiddenKey = "hiddenGroups"
     private static let savedKey = "playlists"
     private static let activeKey = "activePlaylistID"
 
@@ -186,6 +189,47 @@ final class PlaylistStore: ObservableObject {
         set { defaults.set(newValue.timeIntervalSince1970, forKey: "playlistsStamp") }
     }
 
+    // MARK: Hidden groups
+
+    nonisolated static func hiddenKey(group: String, kind: ChannelKind) -> String {
+        "\(kind.rawValue)/\(group)"
+    }
+
+    /// The playlist's groups of one kind, without the hidden ones.
+    func visibleGroups(_ kind: ChannelKind) -> [String] {
+        (playlist.groupsByKind[kind] ?? []).filter { !hiddenGroups.contains(Self.hiddenKey(group: $0, kind: kind)) }
+    }
+
+    func setHidden(_ hidden: Bool, groups: [String], kind: ChannelKind) {
+        let keys = groups.map { Self.hiddenKey(group: $0, kind: kind) }
+        if hidden { hiddenGroups.formUnion(keys) } else { hiddenGroups.subtract(keys) }
+        hiddenStamp = Date()
+        persistHidden()
+        CloudSync.write(SyncedFavourites(updatedAt: hiddenStamp, keys: hiddenGroups.sorted()), key: Self.hiddenKey)
+    }
+
+    private var hiddenStamp: Date {
+        get { Date(timeIntervalSince1970: defaults.double(forKey: "hiddenGroupsStamp")) }
+        set { defaults.set(newValue.timeIntervalSince1970, forKey: "hiddenGroupsStamp") }
+    }
+
+    private func persistHidden() {
+        defaults.set(hiddenGroups.sorted(), forKey: Self.hiddenKey)
+    }
+
+    private func pullHidden() {
+        guard let remote = CloudSync.read(SyncedFavourites.self, key: Self.hiddenKey) else {
+            if !hiddenGroups.isEmpty {
+                CloudSync.write(SyncedFavourites(updatedAt: hiddenStamp, keys: hiddenGroups.sorted()), key: Self.hiddenKey)
+            }
+            return
+        }
+        guard remote.updatedAt > hiddenStamp else { return }
+        hiddenGroups = Set(remote.keys)
+        hiddenStamp = remote.updatedAt
+        persistHidden()
+    }
+
     private func pullFavourites() {
         let remote = CloudSync.read(SyncedFavourites.self, key: Self.favouritesKey)
         let neverSynced = favouritesStamp.timeIntervalSince1970 == 0
@@ -281,6 +325,7 @@ final class PlaylistStore: ObservableObject {
            let decoded = try? JSONDecoder().decode([ChannelList].self, from: data) {
             lists = decoded
         }
+        hiddenGroups = Set(defaults.stringArray(forKey: Self.hiddenKey) ?? [])
         // Older versions also stored channel favourites as stream addresses.
         if favourites.contains(where: { $0.contains("://") }) {
             favourites = Set(favourites.map { $0.contains("://") ? Channel.key(forStreamURL: $0) : $0 })
@@ -314,10 +359,12 @@ final class PlaylistStore: ObservableObject {
         CloudSync.removeLegacyKeychainItem()
         pullFavourites()
         pullLists()
+        pullHidden()
         subscription = CloudSync.changes.receive(on: DispatchQueue.main).sink { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.pullFavourites()
                 self?.pullLists()
+                self?.pullHidden()
                 Task { await self?.pullPlaylists() }
             }
         }
