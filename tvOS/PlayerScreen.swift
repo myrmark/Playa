@@ -53,6 +53,34 @@ struct PlayerScreen: View {
             VideoSurface(layer: player.videoLayer)
                 .ignoresSafeArea()
 
+            // Takes the remote while no panel is open. It is a layer of its own because a move
+            // handler on the whole screen would also swallow the swipes meant for a panel's buttons.
+            Color.clear
+                .contentShape(Rectangle())
+                .ignoresSafeArea()
+                .focusable(!showsPanel && !showsOptions)
+                // Pressing select brings up the channel list over the picture, which keeps playing.
+                .onTapGesture {
+                    withAnimation { showsPanel = true }
+                }
+                .onMoveCommand { direction in
+                    // With a panel open, swipes move between its buttons and mustn't also reach the stream.
+                    guard !showsPanel, !showsOptions else { return }
+                    switch direction {
+                    // Swiping down brings up the channel list, as select does.
+                    case .down: withAnimation { showsPanel = true }
+                    case .left where isLive: zap(-1)
+                    case .right where isLive: zap(1)
+                    case .left where !isLive: seek(by: -15)
+                    case .right where !isLive: seek(by: 15)
+                    // Swiping up brings up the info bar with the options for this stream.
+                    case .up:
+                        withAnimation { showsOptions = true }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { optionFocus = 0 }
+                    default: flashInfo()
+                    }
+                }
+
             if let error = player.errorMessage {
                 VStack(spacing: 16) {
                     Text(error)
@@ -80,33 +108,10 @@ struct PlayerScreen: View {
                     .transition(.opacity)
             }
         }
-        // While a panel is open its buttons take the remote; otherwise the picture does.
-        .focusable(!showsPanel && !showsOptions)
-        // Pressing select brings up the channel list over the picture, which keeps playing.
-        .onTapGesture {
-            withAnimation { showsPanel = true }
-        }
         .sheet(isPresented: $showsTracks) { trackList }
         .onPlayPauseCommand {
             if player.canRetry { player.retry() } else { player.togglePause() }
             flashInfo()
-        }
-        .onMoveCommand { direction in
-            // With a panel open, swipes move between its buttons and mustn't also reach the stream.
-            guard !showsPanel, !showsOptions else { return }
-            switch direction {
-            // Swiping down brings up the channel list, as select does.
-            case .down: withAnimation { showsPanel = true }
-            case .left where isLive: zap(-1)
-            case .right where isLive: zap(1)
-            case .left where !isLive: seek(by: -15)
-            case .right where !isLive: seek(by: 15)
-            // Swiping up brings up the info bar with the options for this stream.
-            case .up:
-                withAnimation { showsOptions = true }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { optionFocus = 0 }
-            default: flashInfo()
-            }
         }
         .onAppear {
             index = session.index
