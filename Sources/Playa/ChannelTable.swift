@@ -40,7 +40,11 @@ struct ChannelTable: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let tableView = NSTableView()
+        let tableView = ActivatingTableView()
+        // A single click only selects, so rows can be picked for a list without changing channel.
+        tableView.target = context.coordinator
+        tableView.doubleAction = #selector(Coordinator.activate)
+        tableView.onReturn = { [weak coordinator = context.coordinator] in coordinator?.activate() }
         tableView.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("channel")))
         tableView.headerView = nil
         tableView.style = .inset
@@ -76,13 +80,20 @@ struct ChannelTable: NSViewRepresentable {
         let favouritesChanged = coordinator.favourites != favourites || coordinator.guideStamp != guideStamp
         coordinator.favourites = favourites
         coordinator.guideStamp = guideStamp
+        let playingChanged = coordinator.playing != selection
+        let previous = coordinator.playing
+        coordinator.playing = selection
         if coordinator.generation != generation {
             coordinator.generation = generation
             coordinator.channels = channels
             coordinator.reload(selecting: selection)
-        } else if coordinator.selectedChannel != selection, !coordinator.hasMultipleSelection {
-            // A multiple selection is the user's work in progress; leave it alone.
-            coordinator.select(selection)
+        } else if playingChanged {
+            coordinator.refreshRows(for: [previous, selection])
+            // Follow a channel change made elsewhere, such as from the guide. A multiple
+            // selection is the user's work in progress; leave it alone.
+            if coordinator.selectedChannel != selection, !coordinator.hasMultipleSelection {
+                coordinator.select(selection)
+            }
         }
         if favouritesChanged, let tableView = coordinator.tableView {
             let visibleRows = tableView.rows(in: tableView.visibleRect)
@@ -103,6 +114,8 @@ struct ChannelTable: NSViewRepresentable {
         var guideStamp = 0
         static let rowType = NSPasteboard.PasteboardType("com.filipmalmberg.Playa.channel-row")
         var channels: [Channel] = []
+        /// The channel on screen, marked in the list; the highlighted row may be another.
+        var playing: Channel?
         var generation = -1
         weak var tableView: NSTableView?
         private var isUpdatingSelection = false
@@ -185,6 +198,27 @@ struct ChannelTable: NSViewRepresentable {
             return true
         }
 
+        /// Double-click or Return: play the highlighted row.
+        @objc func activate() {
+            guard let tableView else { return }
+            let row = tableView.clickedRow >= 0 ? tableView.clickedRow : tableView.selectedRow
+            guard channels.indices.contains(row) else { return }
+            selection.wrappedValue = channels[row]
+        }
+
+        /// The name as shown: the playing channel carries a marker.
+        private func shownTitle(_ channel: Channel) -> String {
+            (channel == playing ? "▶ " : "") + title(channel)
+        }
+
+        func refreshRows(for changed: [Channel?]) {
+            guard let tableView else { return }
+            let rows = IndexSet(changed.compactMap { $0 }.compactMap { channels.firstIndex(of: $0) })
+            guard !rows.isEmpty else { return }
+            tableView.noteHeightOfRows(withIndexesChanged: rows)
+            tableView.reloadData(forRowIndexes: rows, columnIndexes: [0])
+        }
+
         var selectedChannel: Channel? {
             guard let row = tableView?.selectedRow, channels.indices.contains(row) else { return nil }
             return channels[row]
@@ -222,7 +256,7 @@ struct ChannelTable: NSViewRepresentable {
                 ?? ChannelCellView(identifier: identifier)
             let channel = channels[row]
             cell.configure(
-                with: channel, title: title(channel), isFavourite: favourites.contains(channel.key),
+                with: channel, title: shownTitle(channel), isFavourite: favourites.contains(channel.key),
                 subtitle: subtitle(channel), textWidth: textWidth(in: tableView)
             )
             cell.onToggleFavourite = { [weak self] in self?.toggleFavourite(channel) }
@@ -236,7 +270,7 @@ struct ChannelTable: NSViewRepresentable {
         /// Rows grow by a line when the channel's name needs two.
         func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
             guard channels.indices.contains(row) else { return 38 }
-            return ChannelCellView.lines(for: title(channels[row]), textWidth: textWidth(in: tableView)) == 2 ? 54 : 38
+            return ChannelCellView.lines(for: shownTitle(channels[row]), textWidth: textWidth(in: tableView)) == 2 ? 54 : 38
         }
 
         /// Widening or narrowing the sidebar changes which names fit on one line.
@@ -251,13 +285,18 @@ struct ChannelTable: NSViewRepresentable {
                 tableView.reloadData(forRowIndexes: IndexSet(integersIn: rows), columnIndexes: [0])
             }
         }
+    }
+}
 
-        func tableViewSelectionDidChange(_ notification: Notification) {
-            // A reload that drops the playing channel from view must not stop playback.
-            // Only a plain single selection picks a channel to play; building up a multiple
-            // selection must not switch streams.
-            guard !isUpdatingSelection, !hasMultipleSelection, let channel = selectedChannel else { return }
-            selection.wrappedValue = channel
+/// A table that reports Return, which plays the highlighted row.
+final class ActivatingTableView: NSTableView {
+    var onReturn: (() -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 36 || event.keyCode == 76 {
+            onReturn?()
+        } else {
+            super.keyDown(with: event)
         }
     }
 }
