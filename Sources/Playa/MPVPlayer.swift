@@ -282,15 +282,6 @@ final class MPVPlayer: ObservableObject {
         queue.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
-    /// Off while the app is in the background: only the sound plays, and nothing is drawn.
-    func setVideoEnabled(_ isEnabled: Bool) {
-        queue.async { mpv_set_property_string(self.mpv, "vid", isEnabled ? "auto" : "no") }
-    }
-
-    func setPaused(_ isPaused: Bool) {
-        queue.async { mpv_set_property_string(self.mpv, "pause", isPaused ? "yes" : "no") }
-    }
-
     func togglePause() {
         command(["cycle", "pause"])
     }

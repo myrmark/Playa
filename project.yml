@@ -161,9 +161,6 @@ targets:
         CFBundleDisplayName: Playa
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        # Sound carries on when the app is left, if chosen in Settings.
-        UIBackgroundModes:
-          - audio
         UILaunchScreen: {}
         ITSAppUsesNonExemptEncryption: false
         UISupportedInterfaceOrientations:

@@ -36,12 +36,6 @@ struct PlayerView: View {
     @State private var edgeToken = 0
     @State private var originalBrightness: CGFloat?
     @StateObject private var volume = SystemVolume()
-    @AppStorage(PlayerView.backgroundSoundKey) private var playsInBackground = true
-    @State private var isInBackground = false
-    /// Closes a stream left paused in the background, so it doesn't hold the subscription's one stream.
-    @State private var pausedCloseTask: Task<Void, Never>?
-
-    static let backgroundSoundKey = "backgroundSound"
 
     private var channel: Channel { session.channels[index] }
     private var isLive: Bool { channel.kind == .live }
@@ -110,50 +104,13 @@ struct PlayerView: View {
         .onAppear {
             index = session.index
             start()
-            NowPlaying.attach(player)
-            updateNowPlaying()
         }
         .onDisappear(perform: close)
         // A suspended app must not keep a stream open: on a single-stream subscription it would
         // collide with whatever is watched next on another device.
-        // Unless the sound is to carry on, and is actually playing, so it can't be forgotten.
         .onChange(of: scenePhase) { _, phase in
-            switch phase {
-            case .inactive where !isInBackground:
-                // iOS forbids drawing with the GPU in the background, and the video engine hangs,
-                // sound and all, if it is still drawing when that starts. So the picture is turned
-                // off as soon as the app begins to leave the screen, which may only be for Control
-                // Centre, and back on when it returns.
-                if playsInBackground, !player.isPaused, player.errorMessage == nil {
-                    isInBackground = true
-                    player.setVideoEnabled(false)
-                }
-            case .background:
-                guard isInBackground, !player.isPaused, player.errorMessage == nil else {
-                    dismiss()
-                    return
-                }
-            case .active where isInBackground:
-                isInBackground = false
-                pausedCloseTask?.cancel()
-                player.setVideoEnabled(true)
-            default:
-                break
-            }
+            if phase == .background { dismiss() }
         }
-        .onChange(of: player.isPaused) { _, isPaused in
-            pausedCloseTask?.cancel()
-            guard isInBackground, isPaused else { return }
-            pausedCloseTask = Task {
-                try? await Task.sleep(for: .seconds(60))
-                if !Task.isCancelled, isInBackground, player.isPaused { dismiss() }
-            }
-        }
-        .onChange(of: player.errorMessage) { _, message in
-            if isInBackground, message != nil { dismiss() }
-        }
-        .onChange(of: index) { _, _ in updateNowPlaying() }
-        .onChange(of: epg.version) { _, _ in updateNowPlaying() }
         .onChange(of: player.position) { _, position in
             if Int(position) % 10 == 0, position > 0 { savePosition(isFinal: false) }
         }
@@ -396,46 +353,12 @@ struct PlayerView: View {
             }
     }
 
-    /// What the Lock Screen and Control Centre show while the sound plays on.
-    private func updateNowPlaying() {
-        var info: [String: Any] = [MPMediaItemPropertyTitle: channel.name]
-        if isLive {
-            info[MPNowPlayingInfoPropertyIsLiveStream] = true
-            if let now = epg.guide.nowAndNext(channelID: channel.tvgID, at: Date()).now {
-                info[MPMediaItemPropertyArtist] = now.title
-            }
-        }
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
-    }
-
     private func close() {
-        pausedCloseTask?.cancel()
-        NowPlaying.detach()
         // Brightness set for watching is for watching only.
         if let originalBrightness { UIScreen.main.brightness = originalBrightness }
         watchTask?.cancel()
         savePosition(isFinal: true)
         player.stop()
-    }
-}
-
-/// Play and pause from the Lock Screen, Control Centre and headphones.
-@MainActor
-enum NowPlaying {
-    static func attach(_ player: MPVPlayer) {
-        detach()
-        let center = MPRemoteCommandCenter.shared()
-        center.playCommand.addTarget { _ in player.setPaused(false); return .success }
-        center.pauseCommand.addTarget { _ in player.setPaused(true); return .success }
-        center.togglePlayPauseCommand.addTarget { _ in player.togglePause(); return .success }
-    }
-
-    static func detach() {
-        let center = MPRemoteCommandCenter.shared()
-        for command in [center.playCommand, center.pauseCommand, center.togglePlayPauseCommand] {
-            command.removeTarget(nil)
-        }
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
 }
 
