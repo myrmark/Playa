@@ -19,7 +19,7 @@ settingGroups:
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.0"
     ENABLE_USER_SCRIPT_SANDBOXING: false
-    MARKETING_VERSION: "1.0.0"
+    MARKETING_VERSION: "1.0.1"
     CURRENT_PROJECT_VERSION: "1"
 targets:
   # Named PlayaMac so its scheme doesn't collide with the package's "Playa" executable.
