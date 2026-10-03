@@ -119,13 +119,20 @@ struct PlayerView: View {
         // Unless the sound is to carry on, and is actually playing, so it can't be forgotten.
         .onChange(of: scenePhase) { _, phase in
             switch phase {
+            case .inactive where !isInBackground:
+                // iOS forbids drawing with the GPU in the background, and the video engine hangs,
+                // sound and all, if it is still drawing when that starts. So the picture is turned
+                // off as soon as the app begins to leave the screen, which may only be for Control
+                // Centre, and back on when it returns.
+                if playsInBackground, !player.isPaused, player.errorMessage == nil {
+                    isInBackground = true
+                    player.setVideoEnabled(false)
+                }
             case .background:
-                guard playsInBackground, !player.isPaused, player.errorMessage == nil else {
+                guard isInBackground, !player.isPaused, player.errorMessage == nil else {
                     dismiss()
                     return
                 }
-                isInBackground = true
-                player.setVideoEnabled(false)
             case .active where isInBackground:
                 isInBackground = false
                 pausedCloseTask?.cancel()
