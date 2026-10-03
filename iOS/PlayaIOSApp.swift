@@ -12,6 +12,7 @@ struct PlayaIOSApp: App {
     @StateObject private var following = FollowingStore()
     @StateObject private var lock = AppLock()
     @Environment(\.scenePhase) private var scenePhase
+    @State private var hasBeenUnlocked = false
 
     init() {
         try? AVAudioSession.sharedInstance().setCategory(.playback)
@@ -19,13 +20,22 @@ struct PlayaIOSApp: App {
 
     var body: some Scene {
         WindowGroup {
-            Group {
-                // The app's content isn't even created until the PIN has been entered.
+            ZStack {
+                // The app's content isn't even created until the PIN has been entered. Locking
+                // again later only covers it, so sound playing on in the background keeps going.
+                if hasBeenUnlocked {
+                    RootView()
+                        .opacity(lock.isLocked ? 0 : 1)
+                        .allowsHitTesting(!lock.isLocked)
+                        .accessibilityHidden(lock.isLocked)
+                }
                 if lock.isLocked {
                     LockScreen()
-                } else {
-                    RootView()
+                        .background(Color(uiColor: .systemBackground))
                 }
+            }
+            .onChange(of: lock.isLocked, initial: true) { _, isLocked in
+                if !isLocked { hasBeenUnlocked = true }
             }
             .environmentObject(lock)
             // Leaving the app locks it again, so it can't be picked up where it was left.

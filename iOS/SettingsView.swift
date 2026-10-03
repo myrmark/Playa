@@ -5,6 +5,7 @@ struct SettingsView: View {
     @EnvironmentObject private var store: PlaylistStore
     @EnvironmentObject private var epg: EPGStore
     @AppStorage(MPVPlayer.autoReconnectKey) private var autoReconnect = false
+    @AppStorage(PlayerView.backgroundSoundKey) private var playsInBackground = true
     @State private var playlistToRemove: SavedPlaylist?
 
     var body: some View {
@@ -58,6 +59,12 @@ struct SettingsView: View {
                         }
                     }
                     LabeledContent("TV guide", value: guideStatus)
+                }
+
+                Section {
+                    Toggle("Keep the sound playing when leaving Playa", isOn: $playsInBackground)
+                } footer: {
+                    Text("The sound carries on when you switch apps or lock the phone, and can be paused from the Lock Screen. The stream is closed if it stays paused in the background for a minute. With this off, leaving Playa closes the stream at once.")
                 }
 
                 Section {
