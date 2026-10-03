@@ -60,6 +60,10 @@ struct ContentView: View {
     @AppStorage(SettingsView.autoplayKey) private var autoplayOnLaunch = false
     /// The last channel is selected at launch but not played until the user asks: starting a
     /// stream unprompted could be a second one on a single-stream subscription.
+    /// In full screen the picture gets the whole screen: no sidebar, no toolbar.
+    @State private var isFullScreen = false
+    @State private var columnVisibility = NavigationSplitViewVisibility.all
+    @State private var visibilityBeforeFullScreen = NavigationSplitViewVisibility.all
     @State private var holdsPlayback = false
     /// Advances once a minute so now/next labels follow the clock.
     @State private var now = Date()
@@ -123,7 +127,7 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             sidebar
                 .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 720)
         } detail: {
@@ -147,9 +151,20 @@ struct ContentView: View {
                 spaceTogglesPause: !isSearching && !showingGuide && !showingFollowing,
                 programmes: epg.guide.nowAndNext(channelID: selectedChannel?.tvgID, at: now),
                 isFavourite: selectedChannel.map { store.favourites.contains($0.key) } ?? false,
-                toggleFavourite: { if let selectedChannel { store.toggleFavourite(selectedChannel) } }
+                toggleFavourite: { if let selectedChannel { store.toggleFavourite(selectedChannel) } },
+                isFullScreen: isFullScreen
             )
                 .navigationTitle(selectedChannel?.name ?? "Playa")
+        }
+        .toolbar(isFullScreen ? .hidden : .visible, for: .windowToolbar)
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willEnterFullScreenNotification)) { _ in
+            visibilityBeforeFullScreen = columnVisibility
+            columnVisibility = .detailOnly
+            isFullScreen = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willExitFullScreenNotification)) { _ in
+            columnVisibility = visibilityBeforeFullScreen
+            isFullScreen = false
         }
         .overlay {
             if showingGuide {
@@ -786,8 +801,13 @@ private struct PlayerPane: View {
     let programmes: (now: Programme?, next: Programme?)
     let isFavourite: Bool
     let toggleFavourite: () -> Void
+    /// In full screen the controls float over the picture and fade away while the mouse rests.
+    let isFullScreen: Bool
 
     @StateObject private var player = MPVPlayer()
+    @State private var showsControls = true
+    @State private var isOverControls = false
+    @State private var hideTask: Task<Void, Never>?
     /// Slider value while the user is dragging the seek bar.
     @State private var scrubPosition: Double?
     /// What the player is showing, kept so its position can be saved when the selection moves on.
@@ -835,8 +855,19 @@ private struct PlayerPane: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            controls
+            if !isFullScreen { controls }
         }
+        .overlay(alignment: .bottom) {
+            if isFullScreen, showsControls || player.isPaused {
+                controls
+                    .onHover { isOverControls = $0 }
+                    .transition(.opacity)
+            }
+        }
+        .onContinuousHover { phase in
+            if isFullScreen, case .active = phase { revealControls() }
+        }
+        .onChange(of: isFullScreen) { _, _ in revealControls() }
         // Keyed on the stream, so a playlist refresh that renumbers channels doesn't restart playback.
         .onChange(of: channel?.url, initial: true) { _, _ in startPlayback() }
         .onChange(of: isHeld) { _, _ in startPlayback() }
@@ -845,6 +876,19 @@ private struct PlayerPane: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
             savePosition(isFinal: true)
+        }
+    }
+
+    /// Shows the full-screen controls, and hides them with the pointer once the mouse rests.
+    private func revealControls() {
+        if !showsControls { withAnimation(.easeOut(duration: 0.15)) { showsControls = true } }
+        hideTask?.cancel()
+        guard isFullScreen else { return }
+        hideTask = Task {
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled, isFullScreen, !isOverControls else { return }
+            withAnimation { showsControls = false }
+            NSCursor.setHiddenUntilMouseMoves(true)
         }
     }
 
