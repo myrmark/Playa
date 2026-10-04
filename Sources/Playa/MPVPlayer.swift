@@ -55,7 +55,7 @@ final class MPVPlayer: ObservableObject {
     static let qualityKey = "pictureQuality"
 
     /// Applies at once, to the stream that is playing too. Not used on the Mac, which always does its best.
-    @Published var quality = Quality(rawValue: UserDefaults.standard.string(forKey: MPVPlayer.qualityKey) ?? "") ?? .balanced {
+    @Published var quality = Quality(rawValue: UserDefaults.standard.string(forKey: MPVPlayer.qualityKey) ?? "") ?? .best {
         didSet {
             UserDefaults.standard.set(quality.rawValue, forKey: Self.qualityKey)
             let options = quality.options
