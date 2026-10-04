@@ -156,7 +156,9 @@ struct ContentView: View {
             )
                 .navigationTitle(selectedChannel?.name ?? "Playa")
         }
-        .toolbar(isFullScreen ? .hidden : .visible, for: .windowToolbar)
+        // Hiding the toolbar outright would also take the window buttons with it; instead it
+        // slides down with the menu bar when the pointer reaches the top of the screen.
+        .modifier(ToolbarOnHoverInFullScreen())
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.willEnterFullScreenNotification)) { _ in
             visibilityBeforeFullScreen = columnVisibility
             columnVisibility = .detailOnly
@@ -1167,6 +1169,16 @@ private struct PlaylistSheet: View {
         panel.canChooseDirectories = false
         if panel.runModal() == .OK, let url = panel.url {
             urlText = url.absoluteString
+        }
+    }
+}
+
+private struct ToolbarOnHoverInFullScreen: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 15, *) {
+            content.windowToolbarFullScreenVisibility(.onHover)
+        } else {
+            content
         }
     }
 }
