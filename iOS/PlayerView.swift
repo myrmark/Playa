@@ -111,6 +111,13 @@ struct PlayerView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { dismiss() }
         }
+        // The side buttons: shown with the same bar as a swipe along the edge.
+        .onChange(of: volume.changed) { _, value in
+            guard let value, edgeSwipe == nil else { return }
+            edgeToken += 1
+            withAnimation(.easeOut(duration: 0.1)) { edgeLevel = (.volume, value) }
+            hideEdgeLevelSoon()
+        }
         .onChange(of: player.position) { _, position in
             if Int(position) % 10 == 0, position > 0 { savePosition(isFinal: false) }
         }
@@ -345,12 +352,16 @@ struct PlayerView: View {
             }
             .onEnded { _ in
                 edgeSwipe = nil
-                let token = edgeToken
-                Task {
-                    try? await Task.sleep(for: .seconds(1))
-                    if token == edgeToken { withAnimation { edgeLevel = nil } }
-                }
+                hideEdgeLevelSoon()
             }
+    }
+
+    private func hideEdgeLevelSoon() {
+        let token = edgeToken
+        Task {
+            try? await Task.sleep(for: .seconds(1))
+            if token == edgeToken { withAnimation { edgeLevel = nil } }
+        }
     }
 
     private func close() {
@@ -393,6 +404,17 @@ private struct EdgeLevelView: View {
 @MainActor
 final class SystemVolume: ObservableObject {
     let view = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 100, height: 40))
+    /// The volume after every change, including from the side buttons, whose own display the
+    /// volume view keeps away.
+    @Published private(set) var changed: Double?
+    private var observation: NSKeyValueObservation?
+
+    init() {
+        observation = AVAudioSession.sharedInstance().observe(\.outputVolume) { [weak self] _, _ in
+            let value = Double(AVAudioSession.sharedInstance().outputVolume)
+            DispatchQueue.main.async { self?.changed = value }
+        }
+    }
 
     var level: Double {
         get { Double(AVAudioSession.sharedInstance().outputVolume) }
