@@ -37,11 +37,13 @@ MAKE IT YOURS
 • Favourites and your own named lists, in the order you choose
 • Recently watched
 • Hide the groups you never use
-• Choose what opens when the app starts
+• Choose which list opens when the app starts (Mac and Apple TV)
 
 PLAYBACK
 • Plays the common stream and file formats, with hardware decoding
 • Choose audio and subtitle tracks
+• On Apple TV, bring up the channel list with now and next over the picture, without stopping it
+• On iPhone and iPad, swipe the right edge for volume and the left edge for brightness
 • Careful with single-stream subscriptions: Playa never starts a stream by itself and closes one stream before opening the next
 
 SYNC AND PRIVACY
@@ -51,6 +53,33 @@ SYNC AND PRIVACY
 • One purchase covers iPhone, iPad, Mac and Apple TV
 
 Screenshots show Big Buck Bunny (© copyright 2008, Blender Foundation / www.bigbuckbunny.org) and Sintel (© copyright Blender Foundation / durian.blender.org), both licensed under Creative Commons Attribution 3.0.
+
+## What's New in 1.0.1
+
+### All devices
+Following: follow teams, sports and shows, with alternative names, and see every upcoming broadcast in one list, favourites and your preferred languages first.
+Search the TV guide for a programme to find which channel shows it.
+Optional PIN lock.
+If the provider's guide server is down, the last downloaded guide is shown instead of none.
+The screen no longer sleeps or starts the screen saver while something plays.
+
+### Apple TV (add to "All devices")
+Swipe down or press select while watching to see the channel list with now and next over the picture, and choose another channel without stopping. Swipe up for audio, subtitles, picture quality and playback details.
+Swiping down from the tab bar goes straight to the channels.
+Settings are arranged into clear pages, and the PIN is entered on a row of digits.
+Optional matching of the TV's refresh rate to the channel.
+
+### iPhone and iPad (add to "All devices")
+Swipe up and down along the right edge for volume and the left edge for brightness.
+The picture now fills the screen correctly after turning the device.
+
+### Mac (add to "All devices")
+Double-click a channel to play it, so single clicks can select channels for lists.
+The playlist menu is in the toolbar, and playlists can be renamed or given a new address.
+Full screen shows only the picture, with controls that fade away.
+Mute with M and change the volume with + and −.
+Search in the TV guide, and longer channel names wrap onto two lines.
+The picture now fills the window correctly after resizing it.
 
 ## Keywords (100 characters max)
 iptv,m3u,player,tv,guide,epg,xtream,playlist,live,stream,channels,series,films
@@ -78,7 +107,7 @@ https://raw.githubusercontent.com/myrmark/Playa/main/AppStore/demo.m3u
 
 On Apple TV: the app opens on the Add Playlist screen. Enter the address above and choose Add. Then open Live TV, choose "Demo channels" on the left and select a channel. Films are under the Films tab.
 
-On the Mac: click + in the toolbar, paste the address and click Add. Click a channel in the sidebar, then press the Play button.
+On the Mac: open the playlist menu at the right of the toolbar, choose Add Playlist…, paste the address and click Add. Double-click a channel in the sidebar to play it.
 
 On iPhone and iPad: the app opens on the Add Playlist screen. Paste the address above and tap Add. In Live TV, tap "Demo channels" and then a channel. Tap the video to show or hide the player's controls.
 
