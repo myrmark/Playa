@@ -788,6 +788,7 @@ struct ContentView: View {
                                 : resume.label(for: channel)
                         },
                         menu: rowMenu(for:),
+                        catchUpDays: { store.catchUp(for: $0)?.days },
                         onMove: currentList.flatMap { list in
                             searchText.isEmpty ? { channel, before in store.move(channel.key, before: before?.key, inList: list.id) } : nil
                         }

@@ -31,6 +31,8 @@ struct ChannelTable: NSViewRepresentable {
     var title: (Channel) -> String = { $0.name }
     /// The right-click menu for a row, or for all selected rows when the clicked one is among them.
     var menu: ([Channel]) -> [RowMenuItem] = { _ in [] }
+    /// Days of archive, for channels that keep one; they are marked in the list.
+    var catchUpDays: (Channel) -> Int? = { _ in nil }
     /// Set when rows can be dragged into a new order: called with the moved channel and the
     /// channel it should now sit before, or nil for the end.
     var onMove: ((Channel, Channel?) -> Void)?
@@ -77,6 +79,7 @@ struct ChannelTable: NSViewRepresentable {
         coordinator.title = title
         coordinator.menu = menu
         coordinator.onMove = onMove
+        coordinator.catchUpDays = catchUpDays
         let favouritesChanged = coordinator.favourites != favourites || coordinator.guideStamp != guideStamp
         coordinator.favourites = favourites
         coordinator.guideStamp = guideStamp
@@ -111,6 +114,7 @@ struct ChannelTable: NSViewRepresentable {
         var title: (Channel) -> String = { $0.name }
         var menu: ([Channel]) -> [RowMenuItem] = { _ in [] }
         var onMove: ((Channel, Channel?) -> Void)?
+        var catchUpDays: (Channel) -> Int? = { _ in nil }
         var guideStamp = 0
         static let rowType = NSPasteboard.PasteboardType("com.filipmalmberg.Playa.channel-row")
         var channels: [Channel] = []
@@ -257,7 +261,7 @@ struct ChannelTable: NSViewRepresentable {
             let channel = channels[row]
             cell.configure(
                 with: channel, title: shownTitle(channel), isFavourite: favourites.contains(channel.key),
-                subtitle: subtitle(channel), textWidth: textWidth(in: tableView)
+                subtitle: subtitle(channel), catchUpDays: catchUpDays(channel), textWidth: textWidth(in: tableView)
             )
             cell.onToggleFavourite = { [weak self] in self?.toggleFavourite(channel) }
             return cell
@@ -380,12 +384,31 @@ final class ChannelCellView: NSTableCellView {
         return title.count > charactersPerLine ? 2 : 1
     }
 
-    func configure(with channel: Channel, title: String, isFavourite: Bool, subtitle: String?, textWidth: CGFloat) {
+    private static let catchUpSymbol: NSTextAttachment = {
+        let attachment = NSTextAttachment()
+        attachment.image = NSImage(systemSymbolName: "clock.arrow.circlepath", accessibilityDescription: "Catch-up")?
+            .withSymbolConfiguration(.init(pointSize: NSFont.smallSystemFontSize, weight: .regular))
+        return attachment
+    }()
+
+    func configure(with channel: Channel, title: String, isFavourite: Bool, subtitle: String?, catchUpDays: Int? = nil, textWidth: CGFloat) {
         // A wrapping label needs to be told how wide it may get before it works out its height.
         nameField.preferredMaxLayoutWidth = textWidth
         nameField.stringValue = title
-        subtitleField.stringValue = subtitle ?? ""
-        subtitleField.isHidden = subtitle == nil
+        if let catchUpDays {
+            // A channel with an archive: a mark before the programme, and the days on hover.
+            let line = NSMutableAttributedString(attachment: Self.catchUpSymbol)
+            line.append(NSAttributedString(string: " " + (subtitle ?? "Catch-up")))
+            line.addAttributes([.font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize), .foregroundColor: NSColor.secondaryLabelColor],
+                               range: NSRange(location: 0, length: line.length))
+            subtitleField.attributedStringValue = line
+            subtitleField.isHidden = false
+            toolTip = "Catch-up: programmes from the last \(catchUpDays == 1 ? "day" : "\(catchUpDays) days") can be watched"
+        } else {
+            subtitleField.stringValue = subtitle ?? ""
+            subtitleField.isHidden = subtitle == nil
+            toolTip = nil
+        }
         starView.image = NSImage(
             systemSymbolName: isFavourite ? "star.fill" : "star",
             accessibilityDescription: isFavourite ? "Remove from Favourites" : "Add to Favourites"

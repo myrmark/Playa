@@ -590,6 +590,12 @@ struct ChannelRow: View {
                     }
                 }
                 Spacer(minLength: 0)
+                // The channel keeps an archive: programmes can be watched from the start.
+                if store.catchUp(for: channel) != nil {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("Catch-up")
+                }
                 if store.favourites.contains(channel.key) {
                     Image(systemName: "star.fill")
                         .foregroundStyle(.yellow)
