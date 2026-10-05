@@ -123,6 +123,8 @@ public enum EPGLocator {
 public final class XMLTVParser: NSObject, XMLParserDelegate {
     private let wantedChannels: Set<String>?
     private let keepEndingAfter: Date
+    /// Earlier cut-offs for some channels, such as those with an archive to watch from.
+    private let keepPast: [String: Date]
     private var programmes: [String: [Programme]] = [:]
 
     private var currentChannel: String?
@@ -136,17 +138,19 @@ public final class XMLTVParser: NSObject, XMLParserDelegate {
     /// - Parameters:
     ///   - wantedChannels: lowercased channel ids to keep; nil keeps every channel.
     ///   - keepEndingAfter: programmes that ended before this are dropped.
-    public static func parse(stream: InputStream, wantedChannels: Set<String>?, keepEndingAfter: Date) -> Guide {
-        let delegate = XMLTVParser(wantedChannels: wantedChannels, keepEndingAfter: keepEndingAfter)
+    ///   - keepPast: for these lowercased channel ids, programmes are kept back to the given date instead.
+    public static func parse(stream: InputStream, wantedChannels: Set<String>?, keepEndingAfter: Date, keepPast: [String: Date] = [:]) -> Guide {
+        let delegate = XMLTVParser(wantedChannels: wantedChannels, keepEndingAfter: keepEndingAfter, keepPast: keepPast)
         let parser = XMLParser(stream: stream)
         parser.delegate = delegate
         parser.parse()
         return Guide(programmes: delegate.programmes)
     }
 
-    private init(wantedChannels: Set<String>?, keepEndingAfter: Date) {
+    private init(wantedChannels: Set<String>?, keepEndingAfter: Date, keepPast: [String: Date]) {
         self.wantedChannels = wantedChannels
         self.keepEndingAfter = keepEndingAfter
+        self.keepPast = keepPast
     }
 
     public func parser(
@@ -159,7 +163,7 @@ public final class XMLTVParser: NSObject, XMLParserDelegate {
                   wantedChannels?.contains(channel) ?? true,
                   let start = attributes["start"].flatMap(Self.date(from:)),
                   let stop = attributes["stop"].flatMap(Self.date(from:)),
-                  stop > keepEndingAfter
+                  stop > (keepPast[channel] ?? keepEndingAfter)
             else { return }
             currentChannel = channel
             currentStart = start

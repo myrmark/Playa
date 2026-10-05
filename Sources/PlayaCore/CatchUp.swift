@@ -9,11 +9,15 @@ public struct CatchUp: Hashable, Sendable {
     public let days: Int
     /// A template for the archive address, or for what to add to the stream address.
     public let source: String?
+    /// The server's time zone, for archives addressed by wall-clock time (Xtream panels).
+    /// Nil means UTC.
+    public var timeZone: String?
 
-    public init(style: String, days: Int, source: String?) {
+    public init(style: String, days: Int, source: String?, timeZone: String? = nil) {
         self.style = style
         self.days = days
         self.source = source
+        self.timeZone = timeZone
     }
 
     /// Reads the attributes of an `#EXTINF` line, falling back to playlist-wide ones from the
@@ -54,13 +58,13 @@ public struct CatchUp: Hashable, Sendable {
         case "flussonic", "flussonic-hls", "flussonic-ts", "fs":
             return Self.flussonic(streamURL, start: start, duration: duration)
         default:
-            return Self.xtream(streamURL, start: start, duration: duration)
+            return Self.xtream(streamURL, start: start, duration: duration, timeZone: timeZone)
         }
     }
 
     /// Xtream Codes panels: `/live/user/pass/123.ts` becomes
     /// `/timeshift/user/pass/<minutes>/<yyyy-MM-dd:HH-mm>/123.ts`.
-    static func xtream(_ streamURL: String, start: Date, duration: TimeInterval) -> String? {
+    static func xtream(_ streamURL: String, start: Date, duration: TimeInterval, timeZone: String? = nil) -> String? {
         guard var components = URLComponents(string: streamURL) else { return nil }
         var parts = components.path.split(separator: "/").map(String.init)
         if parts.first == "live" { parts.removeFirst() }
@@ -70,7 +74,7 @@ public struct CatchUp: Hashable, Sendable {
         guard Int(id) != nil else { return nil }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.timeZone = timeZone.flatMap(TimeZone.init(identifier:)) ?? TimeZone(identifier: "UTC")
         formatter.dateFormat = "yyyy-MM-dd:HH-mm"
         let minutes = max(Int((duration / 60).rounded(.up)), 1)
         components.path = "/timeshift/\(user)/\(password)/\(minutes)/\(formatter.string(from: start))/\(id).ts"

@@ -46,7 +46,8 @@ final class ResumeStore: ObservableObject {
     /// - Parameter isFinal: playback of this stream is ending, so its row label should catch up
     ///   and other devices should hear about it.
     func record(_ channel: Channel, position: Double, duration: Double, isFinal: Bool) {
-        guard channel.kind != .live, duration > 0 else { return }
+        // A recording from a channel's archive is watched once; it has nothing to come back to.
+        guard channel.kind != .live, !channel.isArchive, duration > 0 else { return }
         let labelChanged = book.record(key: channel.key, position: position, duration: duration)
         save()
         if isFinal { push() }

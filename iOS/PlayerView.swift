@@ -39,7 +39,24 @@ struct PlayerView: View {
     @State private var originalBrightness: CGFloat?
     @StateObject private var volume = SystemVolume()
 
-    private var channel: Channel { session.channels[index] }
+    /// A recording from the channel's archive playing instead of the channel itself.
+    @State private var recording: Channel?
+    private var channel: Channel { recording ?? session.channels[index] }
+
+    /// The programme on now, from the start, when the channel keeps an archive.
+    private var startOverRecording: Channel? {
+        let live = session.channels[index]
+        guard recording == nil, let catchUp = store.catchUp(for: live),
+              let programme = epg.guide.nowAndNext(channelID: live.tvgID, at: Date()).now
+        else { return nil }
+        return live.archived(programme, catchUp: catchUp)
+    }
+
+    private func play(recording new: Channel?) {
+        savePosition(isFinal: true)
+        recording = new
+        start()
+    }
     private var isLive: Bool { channel.kind == .live }
 
     var body: some View {
@@ -149,6 +166,25 @@ struct PlayerView: View {
                     }
                 }
                 Spacer()
+                if let startOverRecording {
+                    Button {
+                        play(recording: startOverRecording)
+                    } label: {
+                        Image(systemName: "gobackward")
+                            .font(.title3)
+                            .padding(8)
+                    }
+                    .accessibilityLabel("Watch from the start")
+                } else if recording != nil {
+                    Button {
+                        play(recording: nil)
+                    } label: {
+                        Text("Live")
+                            .font(.subheadline.weight(.semibold))
+                            .padding(8)
+                    }
+                    .accessibilityLabel("Back to live")
+                }
                 if let lastIndex, session.channels.indices.contains(lastIndex) {
                     Button {
                         switchTo(lastIndex)
@@ -321,7 +357,7 @@ struct PlayerView: View {
         watchTask?.cancel()
         watchTask = Task {
             try? await Task.sleep(for: .seconds(15))
-            if !Task.isCancelled, channel.url == started.url {
+            if !Task.isCancelled, channel.url == started.url, !started.isArchive {
                 store.noteWatched([started.key] + (session.showKey.map { [$0] } ?? []))
             }
         }
@@ -334,6 +370,7 @@ struct PlayerView: View {
 
     private func switchTo(_ position: Int) {
         savePosition(isFinal: true)
+        recording = nil
         lastIndex = index
         index = position
         start()

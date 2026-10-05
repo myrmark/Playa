@@ -32,6 +32,15 @@ final class PlaylistStore: ObservableObject {
     @Published private(set) var recents: [String] = []
     /// Collections the user put together, in the order they were created.
     @Published private(set) var lists: [ChannelList] = []
+    /// Which channels of the active playlist keep an archive, from the provider's panel.
+    @Published private(set) var archive = ArchiveInfo()
+
+    struct ArchiveInfo: Codable, Equatable {
+        /// Days of archive by stream number.
+        var days: [Int: Int] = [:]
+        var timeZone: String?
+        var fetchedAt = Date.distantPast
+    }
 
     /// What is synced between devices. Stamps decide whose copy is newer.
     private struct SyncedFavourites: Codable {
@@ -464,7 +473,11 @@ final class PlaylistStore: ObservableObject {
             guard case .updated(let parsed) = await download(entry, quietly: false) else { return false }
             // The guide on disk belongs to the old address.
             try? FileManager.default.removeItem(at: cacheDirectory.appendingPathComponent("guide-\(id.uuidString).xml"))
-            if activeID == id { playlist = parsed }
+            try? FileManager.default.removeItem(at: archiveFile(for: id))
+            if activeID == id {
+                playlist = parsed
+                await loadArchive(for: entry, force: true)
+            }
         }
         guard let index = saved.firstIndex(where: { $0.id == id }) else { return false }
         saved[index] = entry
@@ -493,6 +506,7 @@ final class PlaylistStore: ObservableObject {
         }
         defaults.removeObject(forKey: files.digestKey)
         try? FileManager.default.removeItem(at: cacheDirectory.appendingPathComponent("guide-\(id.uuidString).xml"))
+        try? FileManager.default.removeItem(at: archiveFile(for: id))
         if activeID == id {
             activeID = saved.first?.id
             playlist = Playlist()
@@ -507,7 +521,42 @@ final class PlaylistStore: ObservableObject {
         await show(active, forceDownload: true)
     }
 
+    /// The channel's archive: what the playlist says, or else what the provider's panel says.
+    func catchUp(for channel: Channel) -> CatchUp? {
+        guard channel.kind == .live, !channel.isArchive else { return nil }
+        if let catchUp = channel.catchUp { return catchUp }
+        guard !archive.days.isEmpty, let id = XtreamPanel.streamID(fromStreamURL: channel.url), let days = archive.days[id] else { return nil }
+        return CatchUp(style: "xc", days: days, source: nil, timeZone: archive.timeZone)
+    }
+
+    private func archiveFile(for id: UUID) -> URL {
+        cacheDirectory.appendingPathComponent("archive-\(id.uuidString).json")
+    }
+
+    /// Reads the panel's archive list, from the cache when it is under 12 hours old. Two small
+    /// information requests to the provider; neither opens a stream.
+    private func loadArchive(for entry: SavedPlaylist, force: Bool) async {
+        let file = archiveFile(for: entry.id)
+        if let data = try? Data(contentsOf: file), let cached = try? JSONDecoder().decode(ArchiveInfo.self, from: data) {
+            if activeID == entry.id { archive = cached }
+            if !force, Date().timeIntervalSince(cached.fetchedAt) < 12 * 3600 { return }
+        } else if activeID == entry.id {
+            archive = ArchiveInfo()
+        }
+        guard let panel = XtreamPanel(playlistURL: entry.url), let listURL = panel.liveStreamsURL else { return }
+        guard let (list, response) = try? await URLSession.shared.data(from: listURL),
+              (response as? HTTPURLResponse)?.statusCode == 200
+        else { return }
+        var info = ArchiveInfo(days: await Task.detached { XtreamPanel.archiveDays(fromLiveStreams: list) }.value, fetchedAt: Date())
+        if !info.days.isEmpty, let infoURL = panel.serverInfoURL, let (serverInfo, _) = try? await URLSession.shared.data(from: infoURL) {
+            info.timeZone = XtreamPanel.timeZone(fromServerInfo: serverInfo)
+        }
+        try? JSONEncoder().encode(info).write(to: file, options: .atomic)
+        if activeID == entry.id { archive = info }
+    }
+
     private func show(_ entry: SavedPlaylist, forceDownload: Bool) async {
+        Task { await loadArchive(for: entry, force: forceDownload) }
         errorMessage = nil
         let files = cacheFiles(for: entry)
         if !forceDownload, let cached = await Task.detached(priority: .userInitiated, operation: { Self.loadCached(files) }).value {

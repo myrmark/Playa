@@ -55,3 +55,30 @@ final class CatchUpTests: XCTestCase {
         XCTAssertFalse(catchUp.covers(now.addingTimeInterval(-3 * 86_400), now: now))
     }
 }
+
+final class XtreamPanelTests: XCTestCase {
+    func testReadsPanelDetailsAndArchiveList() throws {
+        let panel = try XCTUnwrap(XtreamPanel(playlistURL: "http://host:8080/get.php?username=u&password=p&type=m3u_plus&output=ts"))
+        XCTAssertEqual(panel.liveStreamsURL?.absoluteString, "http://host:8080/player_api.php?username=u&password=p&action=get_live_streams")
+        XCTAssertNil(XtreamPanel(playlistURL: "http://example.com/list.m3u"))
+
+        XCTAssertEqual(XtreamPanel.streamID(fromStreamURL: "http://host:8080/live/u/p/1234.ts"), 1234)
+        XCTAssertEqual(XtreamPanel.streamID(fromStreamURL: "http://host:8080/u/p/77"), 77)
+
+        let list = Data(#"[{"stream_id":1,"tv_archive":1,"tv_archive_duration":"3"},{"stream_id":"2","tv_archive":"1","tv_archive_duration":0},{"stream_id":3,"tv_archive":0}]"#.utf8)
+        XCTAssertEqual(XtreamPanel.archiveDays(fromLiveStreams: list), [1: 3, 2: 1])
+        XCTAssertEqual(XtreamPanel.timeZone(fromServerInfo: Data(#"{"server_info":{"timezone":"Europe/Stockholm"}}"#.utf8)), "Europe/Stockholm")
+    }
+
+    func testArchiveUsesTheServerTimeZone() throws {
+        let start = Date(timeIntervalSince1970: 1_790_000_000) // 14:13 UTC, 16:13 in Stockholm
+        let catchUp = CatchUp(style: "xc", days: 1, source: nil, timeZone: "Europe/Stockholm")
+        let channel = Channel(id: 5, name: "Sport", url: "http://host/live/u/p/9.ts", group: "S", logo: nil, tvgID: "s")
+        let recording = try XCTUnwrap(channel.archived(
+            Programme(start: start, stop: start.addingTimeInterval(3600), title: "Match"), catchUp: catchUp, now: start.addingTimeInterval(600)
+        ))
+        XCTAssertEqual(recording.url, "http://host/timeshift/u/p/60/2026-09-21:16-13/9.ts")
+        XCTAssertTrue(recording.isArchive)
+        XCTAssertEqual(recording.kind, .movie)
+    }
+}

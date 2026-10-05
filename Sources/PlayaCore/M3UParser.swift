@@ -36,6 +36,9 @@ public struct Channel: Identifiable, Hashable, Sendable {
     public let kind: ChannelKind
     /// The channel's archive of past programmes, when the playlist offers one.
     public var catchUp: CatchUp?
+    /// A recording from a channel's archive rather than the channel itself: not kept in resume
+    /// positions or recently watched.
+    public var isArchive = false
     /// Stands in for the stream address wherever one is stored or synced (favourites, resume
     /// positions). Stream addresses contain the provider login; this fingerprint does not.
     public let key: String

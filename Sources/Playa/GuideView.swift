@@ -12,6 +12,10 @@ struct GuideView: View {
     let hiddenGroups: Set<String>
     let now: Date
     let playingChannel: Channel?
+    /// The channel's archive, when it keeps one; past programmes on it can be watched.
+    let catchUp: (Channel) -> CatchUp?
+    /// How many days back the longest archive reaches, which is how far back the guide goes.
+    let archiveDays: Int
     let onPlay: (Channel) -> Void
     let onClose: () -> Void
 
@@ -37,8 +41,11 @@ struct GuideView: View {
     init(
         playlist: Playlist, guide: Guide, favourites: Set<String>, lists: [ChannelList], recents: [String], hiddenGroups: Set<String>, now: Date,
         initialFilter: ChannelFilter,
-        playingChannel: Channel?, onPlay: @escaping (Channel) -> Void, onClose: @escaping () -> Void
+        playingChannel: Channel?, catchUp: @escaping (Channel) -> CatchUp? = { _ in nil }, archiveDays: Int = 0,
+        onPlay: @escaping (Channel) -> Void, onClose: @escaping () -> Void
     ) {
+        self.catchUp = catchUp
+        self.archiveDays = archiveDays
         self.playlist = playlist
         self.guide = guide
         self.favourites = favourites
@@ -59,6 +66,10 @@ struct GuideView: View {
     }
 
     private var windowEnd: Date { windowStart.addingTimeInterval(Self.windowLength) }
+    /// The earliest the guide can show: now, or as far back as an archive reaches.
+    private var earliestStart: Date {
+        Self.currentWindowStart(for: now.addingTimeInterval(-Double(archiveDays) * 86_400))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -75,6 +86,7 @@ struct GuideView: View {
                 playingURL: playingChannel?.url,
                 highlight: query,
                 stamp: rowGeneration &* 1_000_003 &+ Int(windowStart.timeIntervalSince1970 / 60) &+ Int(now.timeIntervalSince1970 / 60),
+                catchUp: catchUp,
                 onPlay: onPlay
             )
             .overlay {
@@ -210,11 +222,12 @@ struct GuideView: View {
                 .foregroundStyle(.secondary)
             ControlGroup {
                 Button {
-                    windowStart = max(windowStart.addingTimeInterval(-Self.step), Self.currentWindowStart(for: now))
+                    windowStart = max(windowStart.addingTimeInterval(-Self.step), earliestStart)
                 } label: {
                     Label("Earlier", systemImage: "chevron.left")
                 }
-                .disabled(windowStart <= Self.currentWindowStart(for: now))
+                .help(archiveDays > 0 ? "Earlier programmes; those on channels with catch-up can be watched" : "Earlier")
+                .disabled(windowStart <= earliestStart)
                 Button("Now") { windowStart = Self.currentWindowStart(for: now) }
                 Button {
                     windowStart = windowStart.addingTimeInterval(Self.step)
@@ -259,6 +272,7 @@ private struct GuideTable: NSViewRepresentable {
     let highlight: String
     /// Changes whenever anything the rows draw has changed.
     let stamp: Int
+    let catchUp: (Channel) -> CatchUp?
     let onPlay: (Channel) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -328,14 +342,27 @@ private struct GuideTable: NSViewRepresentable {
                 windowEnd: parent.windowEnd,
                 now: parent.now,
                 isPlaying: channel.url == parent.playingURL,
-                highlight: parent.highlight
+                highlight: parent.highlight,
+                catchUp: parent.catchUp(channel)
             )
             return view
         }
 
+        /// A past programme on a channel with an archive plays the recording; anything else
+        /// plays the channel.
         @objc func rowClicked() {
-            guard let row = tableView?.clickedRow, parent.rows.indices.contains(row) else { return }
-            parent.onPlay(parent.rows[row])
+            guard let tableView, parent.rows.indices.contains(tableView.clickedRow) else { return }
+            let channel = parent.rows[tableView.clickedRow]
+            if let event = NSApp.currentEvent,
+               let rowView = tableView.view(atColumn: 0, row: tableView.clickedRow, makeIfNecessary: false) as? GuideRowView,
+               let programme = rowView.programme(at: rowView.convert(event.locationInWindow, from: nil)),
+               programme.stop <= parent.now,
+               let catchUp = parent.catchUp(channel),
+               let recording = channel.archived(programme, catchUp: catchUp, now: parent.now) {
+                parent.onPlay(recording)
+            } else {
+                parent.onPlay(channel)
+            }
         }
     }
 }
@@ -349,6 +376,16 @@ private final class GuideRowView: NSView {
     private var now = Date()
     private var isPlaying = false
     private var highlight = ""
+    private var catchUp: CatchUp?
+
+    /// Whether a past programme can be watched from the channel's archive.
+    private func isWatchable(_ programme: Programme) -> Bool {
+        programme.stop <= now && catchUp?.covers(programme.start, now: now) == true
+    }
+
+    func programme(at point: NSPoint) -> Programme? {
+        programmes.first { rect(for: $0).contains(point) }
+    }
 
     private func isHighlighted(_ programme: Programme) -> Bool {
         guard !highlight.isEmpty else { return false }
@@ -359,8 +396,9 @@ private final class GuideRowView: NSView {
 
     func configure(
         name: String, programmes: ArraySlice<Programme>, windowStart: Date, windowEnd: Date, now: Date, isPlaying: Bool,
-        highlight: String
+        highlight: String, catchUp: CatchUp?
     ) {
+        self.catchUp = catchUp
         self.highlight = highlight
         self.name = name
         self.programmes = programmes
@@ -400,7 +438,8 @@ private final class GuideRowView: NSView {
         for programme in programmes {
             let times = "\(programme.start.formatted(date: .omitted, time: .shortened))–\(programme.stop.formatted(date: .omitted, time: .shortened))"
             let tag = addToolTip(rect(for: programme), owner: self, userData: nil)
-            toolTipTexts[tag] = [programme.title, times, programme.description].compactMap { $0 }.joined(separator: "\n")
+            let hint = isWatchable(programme) ? "Click to watch it from the archive" : nil
+            toolTipTexts[tag] = [programme.title, times, programme.description, hint].compactMap { $0 }.joined(separator: "\n")
         }
     }
 
@@ -444,7 +483,10 @@ private final class GuideRowView: NSView {
             let block = rect(for: programme)
             guard block.width > 1 else { continue }
             let isOnNow = programme.start <= now && now < programme.stop
-            (isOnNow ? NSColor.controlAccentColor.withAlphaComponent(0.28) : NSColor.labelColor.withAlphaComponent(0.07)).setFill()
+            let isPast = programme.stop <= now
+            // Past programmes are faint, unless they can still be watched from the archive.
+            (isOnNow ? NSColor.controlAccentColor.withAlphaComponent(0.28)
+                : NSColor.labelColor.withAlphaComponent(isPast && !isWatchable(programme) ? 0.03 : 0.07)).setFill()
             NSBezierPath(roundedRect: block, xRadius: 5, yRadius: 5).fill()
             if isHighlighted(programme) {
                 // What the search found stands out with an outline.
@@ -456,9 +498,11 @@ private final class GuideRowView: NSView {
 
             let text = block.insetBy(dx: 7, dy: 0)
             guard text.width > 14 else { continue }
-            (programme.title as NSString).draw(
+            var attributes = titleAttributes
+            if isPast, !isWatchable(programme) { attributes[.foregroundColor] = NSColor.tertiaryLabelColor }
+            ((isWatchable(programme) ? "↺ " + programme.title : programme.title) as NSString).draw(
                 in: NSRect(x: text.minX, y: block.minY + 5, width: text.width, height: 16),
-                withAttributes: titleAttributes
+                withAttributes: attributes
             )
             // A programme that began before the visible window still shows its real start time.
             (programme.start.formatted(date: .omitted, time: .shortened) as NSString).draw(

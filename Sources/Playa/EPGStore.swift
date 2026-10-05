@@ -18,17 +18,25 @@ final class EPGStore: ObservableObject {
 
     private static let maxAge: TimeInterval = 12 * 3600
     private var loadedPlaylistID: UUID?
+    /// The archive days the loaded guide was read with; a change means reading it again.
+    private var loadedArchiveDays: [String: Int] = [:]
     private var loadedAt = Date.distantPast
     private var loadTask: Task<Void, Never>?
 
-    func load(for saved: SavedPlaylist?, playlist: Playlist) {
+    /// - Parameter archiveDays: days of archive by lowercased guide id; programmes of those channels
+    ///   are kept that far back, so they can be watched from the archive.
+    func load(for saved: SavedPlaylist?, playlist: Playlist, archiveDays: [String: Int] = [:]) {
         guard let saved else {
             reset(to: .unavailable)
             return
         }
-        if saved.id == loadedPlaylistID, status == .loading || Date().timeIntervalSince(loadedAt) < Self.maxAge {
+        if saved.id == loadedPlaylistID, archiveDays == loadedArchiveDays,
+           status == .loading || Date().timeIntervalSince(loadedAt) < Self.maxAge {
             return
         }
+        loadedArchiveDays = archiveDays
+        let now = Date()
+        let keepPast = archiveDays.mapValues { now.addingTimeInterval(-Double($0) * 86_400) }
         loadTask?.cancel()
         let wanted = Set(playlist.channels.compactMap { $0.tvgID?.lowercased() })
         guard !wanted.isEmpty, let url = EPGLocator.guideURL(playlistURL: saved.url, advertised: playlist.epgURL) else {
@@ -65,7 +73,8 @@ final class EPGStore: ObservableObject {
                     return XMLTVParser.parse(
                         stream: stream,
                         wantedChannels: wanted,
-                        keepEndingAfter: Date().addingTimeInterval(-3600)
+                        keepEndingAfter: Date().addingTimeInterval(-3600),
+                        keepPast: keepPast
                     )
                 }.value
                 guard !Task.isCancelled else { return }

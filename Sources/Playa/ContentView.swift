@@ -61,6 +61,7 @@ struct ContentView: View {
     @State private var lastChannel: Channel?
     /// Live channels whose past programmes the provider keeps, as the playlist says.
     @State private var catchUpCount = 0
+    @State private var archiveMaxDays = 0
     @State private var showingFollowing = false
     @AppStorage(SettingsView.autoplayKey) private var autoplayOnLaunch = false
     /// The last channel is selected at launch but not played until the user asks: starting a
@@ -146,6 +147,7 @@ struct ContentView: View {
                 hold: { holdsPlayback = true },
                 playlistError: store.errorMessage,
                 noteWatched: { channel in
+                    guard !channel.isArchive else { return }
                     // An episode also brings its show to the front of the recent shows.
                     let show = store.playlist.shows.first { show in
                         channel.kind == .series && show.seasons.contains { $0.episodes.contains { $0.channelID == channel.id } }
@@ -153,6 +155,7 @@ struct ContentView: View {
                     store.noteWatched([channel.key] + (show.map { [$0.favouriteKey] } ?? []))
                 },
                 zap: zap,
+                startOver: startOverRecording.map { recording in { selectedChannel = recording } },
                 // The guide has a search field of its own, where these keys must type.
                 spaceTogglesPause: !isSearching && !showingGuide && !showingFollowing,
                 programmes: epg.guide.nowAndNext(channelID: selectedChannel?.tvgID, at: now),
@@ -186,6 +189,8 @@ struct ContentView: View {
                     now: now,
                     initialFilter: guideStartFilter,
                     playingChannel: selectedChannel,
+                    catchUp: store.catchUp(for:),
+                    archiveDays: archiveMaxDays,
                     onPlay: { channel in
                         selectedChannel = channel
                         showingGuide = false
@@ -315,9 +320,10 @@ struct ContentView: View {
                 filter = .all
             }
             updateVisibleChannels(in: playlist, favourites: store.favourites)
-            epg.load(for: store.active, playlist: playlist)
-            catchUpCount = playlist.channels.reduce(0) { $0 + ($1.catchUp == nil ? 0 : 1) }
+            loadGuide(for: playlist)
         }
+        // The provider's archive list arrives after the playlist; past programmes are then kept.
+        .onChange(of: store.archive) { loadGuide(for: store.playlist) }
         .onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { now = $0 }
         .onReceive(store.$favourites) { favourites in
             if filter == .favourites {
@@ -390,6 +396,28 @@ struct ContentView: View {
                 showingFollowing.toggle()
             }
         }
+    }
+
+    /// Loads the guide, keeping past programmes of the channels with an archive.
+    private func loadGuide(for playlist: Playlist) {
+        var days: [String: Int] = [:]
+        var count = 0
+        for channel in playlist.channels where channel.kind == .live {
+            guard let catchUp = store.catchUp(for: channel) else { continue }
+            count += 1
+            if let id = channel.tvgID?.lowercased() { days[id] = max(days[id] ?? 0, catchUp.days) }
+        }
+        catchUpCount = count
+        archiveMaxDays = days.values.max() ?? 0
+        epg.load(for: store.active, playlist: playlist, archiveDays: days)
+    }
+
+    /// The programme on now, from the start, when the channel keeps an archive.
+    private var startOverRecording: Channel? {
+        guard let channel = selectedChannel, let catchUp = store.catchUp(for: channel),
+              let programme = epg.guide.nowAndNext(channelID: channel.tvgID, at: now).now
+        else { return nil }
+        return channel.archived(programme, catchUp: catchUp)
     }
 
     /// Moves to the channel above (-1) or below (+1) the current one in the sidebar list.
@@ -842,6 +870,8 @@ private struct PlayerPane: View {
     /// Called once a channel has been on for a little while, to record it as recently watched.
     let noteWatched: (Channel) -> Void
     let zap: (Int) -> Void
+    /// Plays the current programme from its start, from the channel's archive; nil when there is none.
+    let startOver: (() -> Void)?
     /// Off while the search field has focus, so a space (and M, + and −) can be typed there.
     let spaceTogglesPause: Bool
     let programmes: (now: Programme?, next: Programme?)
@@ -1123,6 +1153,12 @@ private struct PlayerPane: View {
                         // Hovering shows what the current programme is about, when the guide says.
                         .help(programmes.now?.description ?? "")
                 }
+            }
+            if let startOver {
+                Button(action: startOver) {
+                    Image(systemName: "gobackward")
+                }
+                .help("Watch this programme from the start")
             }
             Button(action: toggleFavourite) {
                 Image(systemName: isFavourite ? "star.fill" : "star")

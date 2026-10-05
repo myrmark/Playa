@@ -46,7 +46,24 @@ struct PlayerScreen: View {
     static let panelOpacityKey = "panelOpacity"
     static let defaultPanelOpacity = 70
 
-    private var channel: Channel { session.channels[index] }
+    /// A recording from the channel's archive playing instead of the channel itself.
+    @State private var recording: Channel?
+    private var channel: Channel { recording ?? session.channels[index] }
+
+    /// The programme on now, from the start, when the channel keeps an archive.
+    private var startOverRecording: Channel? {
+        let live = session.channels[index]
+        guard recording == nil, let catchUp = store.catchUp(for: live),
+              let programme = epg.guide.nowAndNext(channelID: live.tvgID, at: Date()).now
+        else { return nil }
+        return live.archived(programme, catchUp: catchUp)
+    }
+
+    private func play(recording new: Channel?) {
+        savePosition(isFinal: true)
+        recording = new
+        start()
+    }
     private var isLive: Bool { channel.kind == .live }
 
     var body: some View {
@@ -280,6 +297,21 @@ struct PlayerScreen: View {
                 Label(showsHealth ? "Hide playback details" : "Show playback details", systemImage: "waveform.path.ecg")
             }
             .focused($optionFocus, equals: 2)
+            if let startOverRecording {
+                Button {
+                    play(recording: startOverRecording)
+                    withAnimation { showsOptions = false }
+                } label: {
+                    Label("From the start", systemImage: "gobackward")
+                }
+            } else if recording != nil {
+                Button {
+                    play(recording: nil)
+                    withAnimation { showsOptions = false }
+                } label: {
+                    Label("Back to live", systemImage: "dot.radiowaves.left.and.right")
+                }
+            }
             if let lastIndex, session.channels.indices.contains(lastIndex) {
                 Button {
                     backToLastChannel()
@@ -318,7 +350,7 @@ struct PlayerScreen: View {
         watchTask?.cancel()
         watchTask = Task {
             try? await Task.sleep(for: .seconds(15))
-            if !Task.isCancelled, channel.url == started.url {
+            if !Task.isCancelled, channel.url == started.url, !started.isArchive {
                 store.noteWatched([started.key] + (session.showKey.map { [$0] } ?? []))
             }
         }
@@ -331,6 +363,7 @@ struct PlayerScreen: View {
 
     private func switchTo(_ position: Int) {
         savePosition(isFinal: true)
+        recording = nil
         lastIndex = index
         index = position
         start()
