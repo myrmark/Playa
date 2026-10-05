@@ -87,6 +87,10 @@ struct GuideView: View {
                 highlight: query,
                 stamp: rowGeneration &* 1_000_003 &+ Int(windowStart.timeIntervalSince1970 / 60) &+ Int(now.timeIntervalSince1970 / 60),
                 catchUp: catchUp,
+                onShift: { halfHours in
+                    let moved = windowStart.addingTimeInterval(Double(halfHours) * 1800)
+                    windowStart = max(moved, earliestStart)
+                },
                 onPlay: onPlay
             )
             .overlay {
@@ -273,6 +277,8 @@ private struct GuideTable: NSViewRepresentable {
     /// Changes whenever anything the rows draw has changed.
     let stamp: Int
     let catchUp: (Channel) -> CatchUp?
+    /// Moves the time window by this many half hours, for sideways swipes on the trackpad.
+    let onShift: (Int) -> Void
     let onPlay: (Channel) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -296,7 +302,8 @@ private struct GuideTable: NSViewRepresentable {
         tableView.action = #selector(Coordinator.rowClicked)
         context.coordinator.tableView = tableView
 
-        let scrollView = NSScrollView()
+        let scrollView = SwipeScrollView()
+        scrollView.onShift = { [weak coordinator = context.coordinator] in coordinator?.parent.onShift($0) }
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
         // Overlay scrollers keep the rows exactly as wide as the time ruler above them.
@@ -364,6 +371,38 @@ private struct GuideTable: NSViewRepresentable {
                 parent.onPlay(channel)
             }
         }
+    }
+}
+
+/// Scrolls the rows up and down as usual, and turns sideways trackpad swipes into moves along
+/// the time axis, half an hour at a time.
+private final class SwipeScrollView: NSScrollView {
+    var onShift: ((Int) -> Void)?
+    private var sideways: CGFloat = 0
+    private var isSwipingSideways = false
+    /// Points of sideways travel per half hour.
+    private let stepDistance: CGFloat = 50
+
+    override func scrollWheel(with event: NSEvent) {
+        if event.phase == .began {
+            sideways = 0
+            isSwipingSideways = abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY)
+        }
+        // Momentum after the fingers lift would carry the guide hours past where it was aimed.
+        guard event.hasPreciseScrollingDeltas, isSwipingSideways || (event.phase.isEmpty && abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY))
+        else {
+            if event.momentumPhase.isEmpty || !isSwipingSideways { super.scrollWheel(with: event) }
+            return
+        }
+        guard event.momentumPhase.isEmpty else { return }
+        sideways += event.scrollingDeltaX
+        // Fingers moving left reveal what comes later, as with a page.
+        let steps = Int(sideways / stepDistance)
+        if steps != 0 {
+            sideways -= CGFloat(steps) * stepDistance
+            onShift?(-steps)
+        }
+        if event.phase == .ended || event.phase == .cancelled { isSwipingSideways = false }
     }
 }
 
