@@ -34,6 +34,8 @@ public struct Channel: Identifiable, Hashable, Sendable {
     public let logo: String?
     public let tvgID: String?
     public let kind: ChannelKind
+    /// The channel's archive of past programmes, when the playlist offers one.
+    public var catchUp: CatchUp?
     /// Stands in for the stream address wherever one is stored or synced (favourites, resume
     /// positions). Stream addresses contain the provider login; this fingerprint does not.
     public let key: String
@@ -104,6 +106,8 @@ public enum M3UParser {
         var seenGroupsByKind: [ChannelKind: Set<String>] = [:]
         var pending: (name: String, attributes: [String: String])?
         var pendingGroup: String?
+        /// Attributes on the `#EXTM3U` line, which some playlists use as defaults for every channel.
+        var headerAttributes: [String: String] = [:]
 
         let count = bytes.count
         var position = bytes.starts(with: [0xEF, 0xBB, 0xBF]) ? 3 : 0
@@ -121,6 +125,7 @@ public enum M3UParser {
             if line.starts(with: extM3U) {
                 let attributes = parseAttributes(line, from: extM3U.count).attributes
                 playlist.epgURL = attributes["url-tvg"] ?? attributes["x-tvg-url"]
+                headerAttributes = attributes
             } else if line.starts(with: extInf) {
                 let parsed = parseAttributes(line, from: extInf.count)
                 pending = (parsed.rest, parsed.attributes)
@@ -150,6 +155,9 @@ public enum M3UParser {
                     tvgID: nonEmpty(attributes["tvg-id"]),
                     kind: kind
                 ))
+                if kind == .live, let catchUp = CatchUp.parse(attributes, defaults: headerAttributes) {
+                    playlist.channels[playlist.channels.count - 1].catchUp = catchUp
+                }
                 pending = nil
                 pendingGroup = nil
             }

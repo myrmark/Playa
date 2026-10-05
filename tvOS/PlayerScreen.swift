@@ -36,6 +36,8 @@ struct PlayerScreen: View {
     @State private var watchTask: Task<Void, Never>?
     /// Playback details in the corner, for telling a slow stream from a slow player.
     @State private var showsHealth = false
+    /// The channel before the current one in this session, to switch back to.
+    @State private var lastIndex: Int?
     @StateObject private var screen = ScreenRate()
 
     /// How solid the channel panel is, in percent; lower lets more of the picture through.
@@ -63,6 +65,8 @@ struct PlayerScreen: View {
                 .onTapGesture {
                     withAnimation { showsPanel = true }
                 }
+                // Holding select switches between the last two channels.
+                .onLongPressGesture(minimumDuration: 0.6) { backToLastChannel() }
                 .onMoveCommand { direction in
                     // With a panel open, swipes move between its buttons and mustn't also reach the stream.
                     guard !showsPanel, !showsOptions else { return }
@@ -124,6 +128,8 @@ struct PlayerScreen: View {
             if phase != .active { dismiss() }
         }
         .onChange(of: player.videoFPS) { _, fps in matchScreen(to: fps) }
+        // The sleep timer has closed the stream; leave the player as the back button would.
+        .onChange(of: player.sleptAt) { dismiss() }
         .onChange(of: player.position) { _, position in
             if Int(position) % 10 == 0, position > 0 { savePosition(isFinal: false) }
         }
@@ -137,11 +143,7 @@ struct PlayerScreen: View {
                 List {
                     ForEach(Array(session.channels.enumerated()), id: \.element.id) { position, entry in
                         Button {
-                            if position != index {
-                                savePosition(isFinal: true)
-                                index = position
-                                start()
-                            }
+                            if position != index { switchTo(position) }
                             withAnimation { showsPanel = false }
                         } label: {
                             PanelRow(channel: entry, isPlaying: position == index)
@@ -240,7 +242,8 @@ struct PlayerScreen: View {
                 if showsOptions {
                     options
                 } else {
-                    Text("Swipe down for channels  ·  up for options" + (isLive ? "  ·  left and right change channel" : ""))
+                    Text("Swipe down for channels  ·  up for options" + (isLive ? "  ·  left and right change channel" : "")
+                         + (lastIndex != nil ? "  ·  hold select for the last channel" : ""))
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
@@ -277,6 +280,25 @@ struct PlayerScreen: View {
                 Label(showsHealth ? "Hide playback details" : "Show playback details", systemImage: "waveform.path.ecg")
             }
             .focused($optionFocus, equals: 2)
+            if let lastIndex, session.channels.indices.contains(lastIndex) {
+                Button {
+                    backToLastChannel()
+                    withAnimation { showsOptions = false }
+                } label: {
+                    Label("Back to \(session.channels[lastIndex].name)", systemImage: "arrow.uturn.backward")
+                        .lineLimit(1)
+                        .frame(maxWidth: 420)
+                }
+            }
+            Button {
+                let steps: [Int?] = [nil, 15, 30, 60, 90, 120]
+                let current = player.sleepAt.map { Int(($0.timeIntervalSinceNow / 60).rounded(.up)) }
+                // Each press moves to the next longer time, then back to off.
+                let next = current.map { minutes in steps.first { ($0 ?? 0) > minutes } ?? nil } ?? 15
+                player.setSleepTimer(minutes: next)
+            } label: {
+                Label(player.sleepAt.map { "Sleep at \($0.formatted(date: .omitted, time: .shortened))" } ?? "Sleep timer: off", systemImage: "moon.zzz")
+            }
         }
         .padding(.top, 10)
         .onExitCommand {
@@ -304,8 +326,20 @@ struct PlayerScreen: View {
 
     private func zap(_ offset: Int) {
         guard session.channels.indices.contains(index + offset) else { return }
-        index += offset
+        switchTo(index + offset)
+    }
+
+    private func switchTo(_ position: Int) {
+        savePosition(isFinal: true)
+        lastIndex = index
+        index = position
         start()
+    }
+
+    /// Jumps to the channel watched before this one, and back again on the next press.
+    private func backToLastChannel() {
+        guard let lastIndex, session.channels.indices.contains(lastIndex) else { return }
+        switchTo(lastIndex)
     }
 
     private func seek(by seconds: Double) {

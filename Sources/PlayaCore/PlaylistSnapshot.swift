@@ -5,7 +5,7 @@ import Foundation
 public enum PlaylistSnapshot {
     /// Bump when the layout below, or anything derived while parsing, changes.
     /// A snapshot with another version is ignored and the playlist is downloaded again.
-    public static let formatVersion: UInt32 = 1
+    public static let formatVersion: UInt32 = 2
     private static let magic: [UInt8] = Array("PLYA".utf8)
     private static let absent = UInt32.max
 
@@ -46,6 +46,12 @@ public enum PlaylistSnapshot {
             string(channel.logo)
             string(channel.tvgID)
             string(channel.key)
+            // Catch-up: the style (absent when there is none), the days, and the source template.
+            string(channel.catchUp?.style)
+            if let catchUp = channel.catchUp {
+                number(UInt32(catchUp.days))
+                string(catchUp.source)
+            }
         }
         return out
     }
@@ -102,13 +108,19 @@ public enum PlaylistSnapshot {
                 guard kindIndex < kinds.count,
                       let group = number(), Int(group) < playlist.groups.count,
                       let name = string() ?? nil, let url = string() ?? nil,
-                      let logo = string(), let tvgID = string(), let key = string() ?? nil
+                      let logo = string(), let tvgID = string(), let key = string() ?? nil,
+                      let catchUpStyle = string()
                 else { return nil }
-                counts[kindIndex] += 1
-                playlist.channels.append(Channel(
+                var channel = Channel(
                     id: id, name: name, url: url, group: playlist.groups[Int(group)],
                     logo: logo, tvgID: tvgID, kind: kinds[kindIndex], key: key
-                ))
+                )
+                if let catchUpStyle {
+                    guard let days = number(), let source = string() else { return nil }
+                    channel.catchUp = CatchUp(style: catchUpStyle, days: Int(days), source: source)
+                }
+                counts[kindIndex] += 1
+                playlist.channels.append(channel)
             }
             for (index, count) in counts.enumerated() where count > 0 {
                 playlist.countByKind[kinds[index]] = count

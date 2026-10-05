@@ -5,6 +5,7 @@ import SwiftUI
 struct PlayaApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var lock = AppLock()
+    @StateObject private var playback = PlaybackCommands()
 
     var body: some Scene {
         Window("Playa", id: "main") {
@@ -18,8 +19,10 @@ struct PlayaApp: App {
             }
             .frame(minWidth: 900, minHeight: 520)
             .environmentObject(lock)
+            .environmentObject(playback)
         }
         .defaultSize(width: 1280, height: 760)
+        .commands { PlaybackMenu(commands: playback) }
 
         Settings {
             SettingsView()

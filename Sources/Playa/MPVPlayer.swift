@@ -291,7 +291,32 @@ final class MPVPlayer: ObservableObject {
         command(["seek", String(seconds), "absolute"])
     }
 
+    /// When the sleep timer will stop playback, if it is set.
+    @Published private(set) var sleepAt: Date?
+    /// Set each time the sleep timer stops playback, so the player screen can react.
+    @Published private(set) var sleptAt: Date?
+    private var sleepTask: Task<Void, Never>?
+
+    /// Stops playback after `minutes`; nil turns the timer off. Leaving the player turns it off too.
+    func setSleepTimer(minutes: Int?) {
+        sleepTask?.cancel()
+        guard let minutes else {
+            sleepAt = nil
+            return
+        }
+        let end = Date().addingTimeInterval(Double(minutes) * 60)
+        sleepAt = end
+        sleepTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(end.timeIntervalSinceNow))
+            guard let self, !Task.isCancelled else { return }
+            self.stop()
+            self.sleptAt = Date()
+        }
+    }
+
     func stop() {
+        sleepTask?.cancel()
+        sleepAt = nil
         currentURL = nil
         queue.async {
             self.run(["stop"])

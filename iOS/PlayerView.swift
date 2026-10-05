@@ -30,6 +30,8 @@ struct PlayerView: View {
     @State private var watchTask: Task<Void, Never>?
     /// Slider value while the seek bar is being dragged.
     @State private var scrubPosition: Double?
+    /// The channel before the current one in this session, to switch back to.
+    @State private var lastIndex: Int?
     /// What a vertical swipe along a screen edge is adjusting, and the level it started from.
     @State private var edgeSwipe: (kind: EdgeAdjustment, start: Double)?
     @State private var edgeLevel: (kind: EdgeAdjustment, value: Double)?
@@ -118,6 +120,8 @@ struct PlayerView: View {
             withAnimation(.easeOut(duration: 0.1)) { edgeLevel = (.volume, value) }
             hideEdgeLevelSoon()
         }
+        // The sleep timer has closed the stream; leave the player.
+        .onChange(of: player.sleptAt) { dismiss() }
         .onChange(of: player.position) { _, position in
             if Int(position) % 10 == 0, position > 0 { savePosition(isFinal: false) }
         }
@@ -145,6 +149,17 @@ struct PlayerView: View {
                     }
                 }
                 Spacer()
+                if let lastIndex, session.channels.indices.contains(lastIndex) {
+                    Button {
+                        switchTo(lastIndex)
+                    } label: {
+                        Image(systemName: "arrow.uturn.backward")
+                            .font(.title3)
+                            .padding(8)
+                    }
+                    .accessibilityLabel("Back to \(session.channels[lastIndex].name)")
+                }
+                sleepMenu
                 trackMenu
                 Button {
                     store.toggleFavourite(channel)
@@ -234,6 +249,24 @@ struct PlayerView: View {
         }
     }
 
+    /// Stops playback after a while; the moon fills in while the timer runs.
+    private var sleepMenu: some View {
+        Menu {
+            if let sleepAt = player.sleepAt {
+                Text("Stops at \(sleepAt.formatted(date: .omitted, time: .shortened))")
+                Button("Turn Off") { player.setSleepTimer(minutes: nil) }
+            }
+            ForEach([15, 30, 60, 90, 120], id: \.self) { minutes in
+                Button("In \(minutes) minutes") { player.setSleepTimer(minutes: minutes) }
+            }
+        } label: {
+            Image(systemName: player.sleepAt == nil ? "moon.zzz" : "moon.zzz.fill")
+                .font(.title3)
+                .padding(8)
+        }
+        .accessibilityLabel("Sleep timer")
+    }
+
     /// Audio and subtitle choices, shown only when the stream offers any.
     @ViewBuilder
     private var trackMenu: some View {
@@ -296,8 +329,13 @@ struct PlayerView: View {
 
     private func zap(_ offset: Int) {
         guard session.channels.indices.contains(index + offset) else { return }
+        switchTo(index + offset)
+    }
+
+    private func switchTo(_ position: Int) {
         savePosition(isFinal: true)
-        index += offset
+        lastIndex = index
+        index = position
         start()
     }
 

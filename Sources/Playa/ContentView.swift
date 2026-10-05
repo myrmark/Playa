@@ -56,6 +56,9 @@ struct ContentView: View {
     @StateObject private var epg = EPGStore()
     @StateObject private var resume = ResumeStore()
     @StateObject private var following = FollowingStore()
+    @EnvironmentObject private var playback: PlaybackCommands
+    /// The channel before the current one, for "Back to Last Channel".
+    @State private var lastChannel: Channel?
     @State private var showingFollowing = false
     @AppStorage(SettingsView.autoplayKey) private var autoplayOnLaunch = false
     /// The last channel is selected at launch but not played until the user asks: starting a
@@ -138,6 +141,7 @@ struct ContentView: View {
                 resume: resume,
                 isHeld: holdsPlayback,
                 release: { holdsPlayback = false },
+                hold: { holdsPlayback = true },
                 playlistError: store.errorMessage,
                 noteWatched: { channel in
                     // An episode also brings its show to the front of the recent shows.
@@ -216,7 +220,6 @@ struct ContentView: View {
                 } label: {
                     Label("Following", systemImage: "binoculars")
                 }
-                .keyboardShortcut("f", modifiers: [.command, .shift])
                 .help("Broadcasts of the teams and shows you follow (⇧⌘F)")
 
                 Button {
@@ -225,7 +228,6 @@ struct ContentView: View {
                 } label: {
                     Label("TV Guide", systemImage: "calendar")
                 }
-                .keyboardShortcut("g", modifiers: .command)
                 .help(epg.guide.isEmpty ? "No TV guide is available for this playlist" : "Show the TV guide (⌘G)")
                 .disabled(epg.guide.isEmpty)
 
@@ -348,8 +350,36 @@ struct ContentView: View {
         }
         .onChange(of: selectedChannel) { old, channel in
             // Picking a different channel is the user asking to play.
-            if let old, old.url != channel?.url { holdsPlayback = false }
+            if let old, old.url != channel?.url {
+                holdsPlayback = false
+                lastChannel = old
+            }
             if let channel { store.lastChannelURL = channel.url }
+            playback.hasChannel = channel != nil
+            playback.isLive = channel?.kind != .series && channel?.kind != .movie
+            playback.lastChannelName = lastChannel?.name
+        }
+        .onChange(of: !isSearching && !showingGuide && !showingFollowing, initial: true) { _, free in
+            playback.keysFree = free
+        }
+        .onChange(of: epg.version, initial: true) { playback.hasGuide = !epg.guide.isEmpty }
+        .onAppear {
+            playback.zap = zap
+            playback.backToLastChannel = {
+                guard let lastChannel else { return }
+                holdsPlayback = false
+                selectedChannel = lastChannel
+            }
+            playback.toggleFavourite = { if let selectedChannel { store.toggleFavourite(selectedChannel) } }
+            playback.showGuide = {
+                guard !epg.guide.isEmpty else { return }
+                showingFollowing = false
+                showingGuide.toggle()
+            }
+            playback.showFollowing = {
+                showingGuide = false
+                showingFollowing.toggle()
+            }
         }
     }
 
@@ -794,6 +824,8 @@ private struct PlayerPane: View {
     /// While held, the selected channel is shown but no stream is opened.
     let isHeld: Bool
     let release: () -> Void
+    /// Puts the player back to holding, as when the sleep timer has stopped it.
+    let hold: () -> Void
     let playlistError: String?
     /// Called once a channel has been on for a little while, to record it as recently watched.
     let noteWatched: (Channel) -> Void
@@ -807,6 +839,7 @@ private struct PlayerPane: View {
     let isFullScreen: Bool
 
     @StateObject private var player = MPVPlayer()
+    @EnvironmentObject private var playback: PlaybackCommands
     @State private var showsControls = true
     @State private var isOverControls = false
     @State private var hideTask: Task<Void, Never>?
@@ -873,6 +906,24 @@ private struct PlayerPane: View {
         // Keyed on the stream, so a playlist refresh that renumbers channels doesn't restart playback.
         .onChange(of: channel?.url, initial: true) { _, _ in startPlayback() }
         .onChange(of: isHeld) { _, _ in startPlayback() }
+        .onAppear {
+            playback.togglePause = { if isHeld { release() } else { player.togglePause() } }
+            playback.toggleMute = { player.isMuted.toggle() }
+            playback.changeVolume = { change in
+                player.isMuted = false
+                player.volume = min(max(player.volume + change, 0), 100)
+            }
+            playback.setSleepTimer = { player.setSleepTimer(minutes: $0) }
+        }
+        .onChange(of: player.isPaused || isHeld, initial: true) { _, paused in playback.isPaused = paused }
+        .onChange(of: player.isMuted, initial: true) { _, muted in playback.isMuted = muted }
+        .onChange(of: player.sleepAt, initial: true) { _, date in playback.sleepAt = date }
+        // The sleep timer has closed the stream: offer to play again rather than reopen it.
+        .onChange(of: player.sleptAt) {
+            savePosition(isFinal: true)
+            playing = nil
+            hold()
+        }
         .onChange(of: player.position) { _, position in
             if Int(position) % 10 == 0, position > 0 { savePosition(isFinal: false) }
         }
@@ -965,7 +1016,8 @@ private struct PlayerPane: View {
     /// keyboards that need Shift for "+".
     private var volumeKeys: some View {
         ZStack {
-            ForEach(["+", "=", "-"], id: \.self) { key in
+            // The Playback menu has + and −; "=" can't be a second shortcut for a menu item.
+            ForEach(["="], id: \.self) { key in
                 Button("") {
                     player.isMuted = false
                     player.volume = min(max(player.volume + (key == "-" ? -5 : 5), 0), 100)
@@ -1021,7 +1073,6 @@ private struct PlayerPane: View {
                 Image(systemName: player.isPaused || isHeld ? "play.fill" : "pause.fill")
                     .frame(width: 20)
             }
-            .keyboardShortcut(spaceTogglesPause ? KeyboardShortcut(.space, modifiers: []) : nil)
             .help(player.isPaused || isHeld ? "Play (Space)" : "Pause (Space)")
             .disabled(channel == nil)
 
@@ -1038,7 +1089,6 @@ private struct PlayerPane: View {
                 } label: {
                     Image(systemName: "chevron.up")
                 }
-                .keyboardShortcut(.upArrow, modifiers: .command)
                 .help("Previous channel (⌘↑)")
                 .disabled(channel == nil)
                 Button {
@@ -1046,7 +1096,6 @@ private struct PlayerPane: View {
                 } label: {
                     Image(systemName: "chevron.down")
                 }
-                .keyboardShortcut(.downArrow, modifiers: .command)
                 .help("Next channel (⌘↓)")
                 .disabled(channel == nil)
             }
@@ -1067,11 +1116,21 @@ private struct PlayerPane: View {
                 Image(systemName: isFavourite ? "star.fill" : "star")
                     .foregroundStyle(isFavourite ? Color.yellow : Color.secondary)
             }
-            .keyboardShortcut("d", modifiers: .command)
             .help(isFavourite ? "Remove from Favourites" : "Add to Favourites")
             .disabled(channel == nil)
             Spacer()
 
+            if let sleepAt = player.sleepAt {
+                Menu {
+                    Button("Turn Off Sleep Timer") { player.setSleepTimer(minutes: nil) }
+                } label: {
+                    Label(sleepAt.formatted(date: .omitted, time: .shortened), systemImage: "moon.zzz")
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("The sleep timer stops playback at \(sleepAt.formatted(date: .omitted, time: .shortened))")
+            }
             trackMenu
             Button {
                 player.isMuted.toggle()
@@ -1080,7 +1139,6 @@ private struct PlayerPane: View {
                     .foregroundStyle(player.isMuted ? Color.primary : Color.secondary)
                     .frame(width: 22)
             }
-            .keyboardShortcut(spaceTogglesPause ? KeyboardShortcut("m", modifiers: []) : nil)
             .help(player.isMuted ? "Unmute (M)" : "Mute (M)")
             Slider(value: $player.volume, in: 0...100)
                 .frame(width: 120)
