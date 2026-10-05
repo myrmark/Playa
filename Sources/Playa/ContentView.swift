@@ -59,6 +59,8 @@ struct ContentView: View {
     @EnvironmentObject private var playback: PlaybackCommands
     /// The channel before the current one, for "Back to Last Channel".
     @State private var lastChannel: Channel?
+    /// Live channels whose past programmes the provider keeps, as the playlist says.
+    @State private var catchUpCount = 0
     @State private var showingFollowing = false
     @AppStorage(SettingsView.autoplayKey) private var autoplayOnLaunch = false
     /// The last channel is selected at launch but not played until the user asks: starting a
@@ -314,6 +316,7 @@ struct ContentView: View {
             }
             updateVisibleChannels(in: playlist, favourites: store.favourites)
             epg.load(for: store.active, playlist: playlist)
+            catchUpCount = playlist.channels.reduce(0) { $0 + ($1.catchUp == nil ? 0 : 1) }
         }
         .onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { now = $0 }
         .onReceive(store.$favourites) { favourites in
@@ -362,7 +365,13 @@ struct ContentView: View {
         .onChange(of: !isSearching && !showingGuide && !showingFollowing, initial: true) { _, free in
             playback.keysFree = free
         }
-        .onChange(of: epg.version, initial: true) { playback.hasGuide = !epg.guide.isEmpty }
+        .onChange(of: epg.version, initial: true) {
+            playback.hasGuide = !epg.guide.isEmpty
+            // Keeps the reminders for followed broadcasts up to date with the guide.
+            if Reminders.isEnabled, !epg.guide.isEmpty {
+                following.search(guide: epg.guide, playlist: store.playlist, favourites: store.favourites, lists: store.lists, hiddenGroups: store.hiddenGroups)
+            }
+        }
         .onAppear {
             playback.zap = zap
             playback.backToLastChannel = {
@@ -599,6 +608,9 @@ struct ContentView: View {
             }
             Divider()
             Button("Add Playlist…") { showingPlaylistSheet = true }
+            if store.active != nil {
+                Text(catchUpCount > 0 ? "Catch-up on \(catchUpCount) channels" : "No catch-up in this playlist")
+            }
             if let active = store.active {
                 Button("Edit “\(active.name)”…") { playlistToEdit = active }
                 Button("Remove “\(active.name)”", role: .destructive) {

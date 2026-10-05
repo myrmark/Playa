@@ -44,6 +44,7 @@ struct PlayaIOSApp: App {
 
 struct RootView: View {
     @EnvironmentObject private var store: PlaylistStore
+    @EnvironmentObject private var following: FollowingStore
     @EnvironmentObject private var epg: EPGStore
     @EnvironmentObject private var listEditor: ListEditor
     @State private var listName = ""
@@ -71,6 +72,12 @@ struct RootView: View {
         }
         .task { await store.loadOnLaunch() }
         .onReceive(store.$playlist) { epg.load(for: store.active, playlist: $0) }
+        // Keeps the reminders for followed broadcasts up to date with the guide.
+        .onChange(of: epg.version) {
+            if Reminders.isEnabled, !epg.guide.isEmpty {
+                following.search(guide: epg.guide, playlist: store.playlist, favourites: store.favourites, lists: store.lists, hiddenGroups: store.hiddenGroups)
+            }
+        }
         .alert(
             listEditor.request?.isRename == true ? "Rename List" : "New List",
             isPresented: Binding(get: { listEditor.request != nil }, set: { if !$0 { listEditor.request = nil } }),

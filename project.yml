@@ -131,6 +131,8 @@ targets:
       - path: Shared
       - path: Sources/Playa/FollowingStore.swift
         group: Shared
+      - path: Sources/Playa/Reminders.swift
+        group: Shared
       - path: Sources/Playa/AppLock.swift
         group: Shared
       - path: Sources/Playa/LockScreen.swift

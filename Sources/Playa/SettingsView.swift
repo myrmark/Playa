@@ -15,6 +15,7 @@ struct SettingsView: View {
                 Text("Both are off by default. Many providers allow only one stream per subscription and may ban accounts that open a second one. With these on, Playa can start a stream while another device is already watching.")
                     .foregroundStyle(.secondary)
             }
+            ReminderSettings()
             PINSettings()
         }
         .formStyle(.grouped)

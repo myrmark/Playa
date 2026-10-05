@@ -23,6 +23,7 @@ final class FollowingStore: ObservableObject {
     private let defaults = UserDefaults.standard
     private static let key = "following"
     private var subscription: AnyCancellable?
+    private var reminderSubscription: AnyCancellable?
     private var searchTask: Task<Void, Never>?
 
     private var stamp: Date {
@@ -39,6 +40,13 @@ final class FollowingStore: ObservableObject {
         subscription = CloudSync.changes.receive(on: DispatchQueue.main).sink { [weak self] _ in
             MainActor.assumeIsolated { self?.pull() }
         }
+        #if !os(tvOS)
+        reminderSubscription = NotificationCenter.default.publisher(for: Reminders.settingsChanged).sink { [weak self] _ in
+            MainActor.assumeIsolated {
+                if let self { Reminders.schedule(self.broadcasts) }
+            }
+        }
+        #endif
     }
 
     func add(name: String, keywords: [String], scope: FollowScope?) {
@@ -121,6 +129,9 @@ final class FollowingStore: ObservableObject {
             if Task.isCancelled { return }
             broadcasts = found
             isSearching = false
+            #if !os(tvOS)
+            Reminders.schedule(found)
+            #endif
         }
     }
 }
