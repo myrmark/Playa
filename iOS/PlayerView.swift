@@ -373,7 +373,7 @@ struct PlayerView: View {
     }
 
     private func start() {
-        player.play(url: channel.url, startAt: resume.resumePosition(for: channel), isLive: isLive)
+        player.play(url: channel.url, startAt: resume.resumePosition(for: channel), isLive: isLive, recording: channel.recording)
         revealControls()
         // Zapping past a channel shouldn't count as watching it.
         let started = channel

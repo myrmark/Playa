@@ -39,6 +39,8 @@ public struct Channel: Identifiable, Hashable, Sendable {
     /// A recording from a channel's archive rather than the channel itself: not kept in resume
     /// positions or recently watched.
     public var isArchive = false
+    /// For a recording: what it was cut from, so it can be opened again further in.
+    public var recording: Recording?
     /// Stands in for the stream address wherever one is stored or synced (favourites, resume
     /// positions). Stream addresses contain the provider login; this fingerprint does not.
     public let key: String

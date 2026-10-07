@@ -1028,7 +1028,7 @@ private struct PlayerPane: View {
         guard !isHeld, let channel, channel.url != playing?.url else { return }
         savePosition(isFinal: true)
         playing = channel
-        player.play(url: channel.url, startAt: resume.resumePosition(for: channel), isLive: channel.kind == .live)
+        player.play(url: channel.url, startAt: resume.resumePosition(for: channel), isLive: channel.kind == .live, recording: channel.recording)
         // Zapping past a channel shouldn't count as watching it.
         watchTask?.cancel()
         watchTask = Task {

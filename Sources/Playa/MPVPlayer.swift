@@ -1,5 +1,6 @@
 import Foundation
 import Libmpv
+import PlayaCore
 import QuartzCore
 #if canImport(UIKit)
 import UIKit
@@ -206,8 +207,19 @@ final class MPVPlayer: ObservableObject {
         thread.start()
     }
 
-    /// - Parameter isLive: live streams are reopened automatically when they drop.
-    func play(url: String, startAt start: Double? = nil, isLive: Bool = false) {
+    /// The recording being played, when it is one from a channel's archive; main thread only.
+    private var recording: Recording?
+    /// How far into the recording the open stream starts; mpv counts from there.
+    private var recordingOffset: Double = 0
+
+    /// - Parameters:
+    ///   - isLive: live streams are reopened automatically when they drop.
+    ///   - recording: for a recording from an archive, what it was cut from. Jumps then open the
+    ///     archive again at the new time: jumping inside the open stream takes minutes, because
+    ///     the server sends everything up to that point first.
+    func play(url: String, startAt start: Double? = nil, isLive: Bool = false, recording: Recording? = nil) {
+        self.recording = recording
+        recordingOffset = 0
         currentURL = url
         self.isLive = isLive
         hasStarted = false
@@ -217,6 +229,7 @@ final class MPVPlayer: ObservableObject {
         isReconnecting = false
         tracks = []
         load(url, startAt: start)
+        if let recording { duration = recording.length }
     }
 
     /// Reopens a live stream that stopped.
@@ -231,8 +244,11 @@ final class MPVPlayer: ObservableObject {
         canRetry = false
         errorMessage = nil
         isBuffering = true
-        position = 0
-        duration = 0
+        // A recording keeps its place and length while it is opened again further in.
+        if recording == nil {
+            position = 0
+            duration = 0
+        }
         let token = loadToken
         latestLoad.withLock { latestLoadToken = token }
         queue.async {
@@ -287,7 +303,21 @@ final class MPVPlayer: ObservableObject {
     }
 
     func seek(to seconds: Double) {
+        if let recording {
+            // Archives are addressed by the minute.
+            let target = (max(seconds, 0) / 60).rounded(.down) * 60
+            guard let url = recording.url(from: target) else { return }
+            recordingOffset = target
+            position = target
+            currentURL = url
+            hasStarted = false
+            retries = 0
+            load(url, startAt: nil)
+            return
+        }
         position = seconds
+        // Shown as loading until the picture is back, which can take a while over a slow connection.
+        isBuffering = true
         command(["seek", String(seconds), "absolute"])
     }
 
@@ -469,7 +499,14 @@ final class MPVPlayer: ObservableObject {
             }
             if property.format == MPV_FORMAT_DOUBLE, let value = property.data?.assumingMemoryBound(to: Double.self).pointee {
                 DispatchQueue.main.async {
-                    if name == "duration" {
+                    if let recording = self.recording {
+                        // The open stream is one stretch of the recording; while it loads, readings
+                        // still belong to the stretch before it.
+                        if name == "time-pos", !self.isBuffering {
+                            let place = min(self.recordingOffset + value, recording.length)
+                            if Int(place) != Int(self.position) { self.position = place }
+                        }
+                    } else if name == "duration" {
                         self.duration = value
                     } else if name == "time-pos", Int(value) != Int(self.position) {
                         // Whole seconds are enough for the seek bar; skip the per-frame updates.

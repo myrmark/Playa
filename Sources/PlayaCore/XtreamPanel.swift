@@ -66,6 +66,24 @@ public struct XtreamPanel: Sendable {
     }
 }
 
+/// A stretch of a channel's archive. Archives aren't made for jumping about in while they play:
+/// the way to another point is to ask for the archive again from there.
+public struct Recording: Hashable, Sendable {
+    /// The live channel's address.
+    public let streamURL: String
+    public let catchUp: CatchUp
+    public let start: Date
+    public let length: TimeInterval
+
+    /// The address that plays the recording from `offset` seconds in. Nil when that point is
+    /// outside the recording or hasn't been broadcast yet.
+    public func url(from offset: TimeInterval, now: Date = Date()) -> String? {
+        let from = start.addingTimeInterval(offset)
+        guard offset >= 0, offset < length, from < now.addingTimeInterval(-60) else { return nil }
+        return catchUp.url(streamURL: streamURL, start: from, duration: length - offset, now: now)
+    }
+}
+
 extension Channel {
     /// The recording of `programme` from this channel's archive, as something to play.
     public func archived(_ programme: Programme, catchUp: CatchUp, now: Date = Date()) -> Channel? {
@@ -78,6 +96,9 @@ extension Channel {
             group: group, logo: logo, tvgID: tvgID, kind: .movie
         )
         recording.isArchive = true
+        recording.recording = Recording(
+            streamURL: self.url, catchUp: catchUp, start: programme.start, length: programme.stop.timeIntervalSince(programme.start)
+        )
         return recording
     }
 

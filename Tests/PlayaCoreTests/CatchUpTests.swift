@@ -91,6 +91,13 @@ final class XtreamPanelTests: XCTestCase {
         let recording = channel.archived(from: start, minutes: 120, catchUp: catchUp, now: now)
         XCTAssertEqual(recording?.url, "http://host/timeshift/u/p/120/2026-10-06:20-00/42.ts")
         XCTAssertEqual(recording?.isArchive, true)
+        // Jumping 45 minutes in asks for the archive again from there, for the time that is left.
+        XCTAssertEqual(recording?.recording?.url(from: 45 * 60, now: now), "http://host/timeshift/u/p/75/2026-10-06:20-45/42.ts")
+        XCTAssertNil(recording?.recording?.url(from: 120 * 60, now: now))
+        // What hasn't been broadcast yet can't be jumped to.
+        let running = channel.archived(from: now.addingTimeInterval(-600), minutes: 60, catchUp: catchUp, now: now)
+        XCTAssertNotNil(running?.recording?.url(from: 300, now: now))
+        XCTAssertNil(running?.recording?.url(from: 900, now: now))
         // Not yet been, and further back than the archive reaches.
         XCTAssertNil(channel.archived(from: now.addingTimeInterval(60), minutes: 30, catchUp: catchUp, now: now))
         XCTAssertNil(channel.archived(from: now.addingTimeInterval(-3 * 86_400), minutes: 30, catchUp: catchUp, now: now))
