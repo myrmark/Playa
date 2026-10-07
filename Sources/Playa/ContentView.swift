@@ -911,6 +911,8 @@ private struct PlayerPane: View {
     @State private var hideTask: Task<Void, Never>?
     /// Slider value while the user is dragging the seek bar.
     @State private var scrubPosition: Double?
+    /// Where along the timeline the pointer is, while it is over it.
+    @State private var hoverX: CGFloat?
     /// What the player is showing, kept so its position can be saved when the selection moves on.
     @State private var playing: Channel?
     @State private var watchTask: Task<Void, Never>?
@@ -1068,10 +1070,39 @@ private struct PlayerPane: View {
                 }
             }
             .controlSize(.small)
+            // Under the pointer: the time a click there would jump to.
+            .onContinuousHover { phase in
+                if case .active(let point) = phase { hoverX = point.x } else { hoverX = nil }
+            }
+            .overlay {
+                GeometryReader { geometry in
+                    if let hoverX {
+                        // The knob's centre stops half a knob short of either end.
+                        let inset: CGFloat = 8
+                        let fraction = min(max((hoverX - inset) / max(geometry.size.width - 2 * inset, 1), 0), 1)
+                        Text(jumpLabel(fraction * player.duration))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.regularMaterial, in: Capsule())
+                            .fixedSize()
+                            .position(x: min(max(hoverX, 40), max(geometry.size.width - 40, 40)), y: -12)
+                    }
+                }
+                .allowsHitTesting(false)
+            }
             Text(Self.timestamp(player.duration))
         }
         .font(.caption.monospacedDigit())
         .foregroundStyle(.secondary)
+    }
+
+    /// What the timeline shows under the pointer. A recording is jumped in by the minute, and
+    /// also gets the time of day it was broadcast.
+    private func jumpLabel(_ seconds: Double) -> String {
+        guard let recording = playing?.recording else { return Self.timestamp(seconds) }
+        let minute = (seconds / 60).rounded(.down) * 60
+        let broadcast = recording.start.addingTimeInterval(minute).formatted(date: .omitted, time: .shortened)
+        return "\(Self.timestamp(minute))  ·  \(broadcast)"
     }
 
     private static func timestamp(_ seconds: Double) -> String {
