@@ -52,6 +52,10 @@ struct PlayerView: View {
         return live.archived(programme, catchUp: catchUp)
     }
 
+    @State private var showsWatchFrom = false
+    /// The live channel's archive, when it has one and no recording is playing.
+    private var liveCatchUp: CatchUp? { recording == nil ? store.catchUp(for: session.channels[index]) : nil }
+
     private func play(recording new: Channel?) {
         savePosition(isFinal: true)
         recording = new
@@ -139,6 +143,15 @@ struct PlayerView: View {
         }
         // The sleep timer has closed the stream; leave the player.
         .onChange(of: player.sleptAt) { dismiss() }
+        .sheet(isPresented: $showsWatchFrom) {
+            if let catchUp = liveCatchUp {
+                let live = session.channels[index]
+                WatchFromPicker(channelName: live.name, days: catchUp.days) { start, minutes in
+                    if let chosen = live.archived(from: start, minutes: minutes, catchUp: catchUp) { play(recording: chosen) }
+                }
+                .presentationDetents([.medium, .large])
+            }
+        }
         .onChange(of: player.position) { _, position in
             if Int(position) % 10 == 0, position > 0 { savePosition(isFinal: false) }
         }
@@ -175,6 +188,16 @@ struct PlayerView: View {
                             .padding(8)
                     }
                     .accessibilityLabel("Watch from the start")
+                }
+                if liveCatchUp != nil {
+                    Button {
+                        showsWatchFrom = true
+                    } label: {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.title3)
+                            .padding(8)
+                    }
+                    .accessibilityLabel("Watch from an earlier time")
                 } else if recording != nil {
                     Button {
                         play(recording: nil)

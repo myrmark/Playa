@@ -59,6 +59,10 @@ struct PlayerScreen: View {
         return live.archived(programme, catchUp: catchUp)
     }
 
+    @State private var showsWatchFrom = false
+    /// The live channel's archive, when it has one and no recording is playing.
+    private var liveCatchUp: CatchUp? { recording == nil ? store.catchUp(for: session.channels[index]) : nil }
+
     private func play(recording new: Channel?) {
         savePosition(isFinal: true)
         recording = new
@@ -130,6 +134,17 @@ struct PlayerScreen: View {
             }
         }
         .sheet(isPresented: $showsTracks) { trackList }
+        .sheet(isPresented: $showsWatchFrom) {
+            if let catchUp = liveCatchUp {
+                let live = session.channels[index]
+                WatchFromPicker(channelName: live.name, days: catchUp.days) { start, minutes in
+                    if let chosen = live.archived(from: start, minutes: minutes, catchUp: catchUp) {
+                        play(recording: chosen)
+                        withAnimation { showsOptions = false }
+                    }
+                }
+            }
+        }
         .onPlayPauseCommand {
             if player.canRetry { player.retry() } else { player.togglePause() }
             flashInfo()
@@ -303,6 +318,13 @@ struct PlayerScreen: View {
                     withAnimation { showsOptions = false }
                 } label: {
                     Label("From the start", systemImage: "gobackward")
+                }
+            }
+            if liveCatchUp != nil {
+                Button {
+                    showsWatchFrom = true
+                } label: {
+                    Label("Watch from…", systemImage: "clock.arrow.circlepath")
                 }
             } else if recording != nil {
                 Button {

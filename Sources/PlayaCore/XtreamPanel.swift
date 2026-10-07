@@ -80,4 +80,11 @@ extension Channel {
         recording.isArchive = true
         return recording
     }
+
+    /// The channel's archive from a time picked by hand, for when the guide has no programme
+    /// to go by.
+    public func archived(from start: Date, minutes: Int, catchUp: CatchUp, now: Date = Date()) -> Channel? {
+        let title = start.formatted(.dateTime.weekday(.abbreviated).hour().minute())
+        return archived(Programme(start: start, stop: start.addingTimeInterval(Double(minutes) * 60), title: title), catchUp: catchUp, now: now)
+    }
 }

@@ -156,6 +156,13 @@ struct ContentView: View {
                 },
                 zap: zap,
                 startOver: startOverRecording.map { recording in { selectedChannel = recording } },
+                archiveDays: selectedChannel.flatMap { store.catchUp(for: $0) }?.days,
+                watchFrom: { start, minutes in
+                    guard let channel = selectedChannel, let catchUp = store.catchUp(for: channel),
+                          let recording = channel.archived(from: start, minutes: minutes, catchUp: catchUp)
+                    else { return }
+                    selectedChannel = recording
+                },
                 // The guide has a search field of its own, where these keys must type.
                 spaceTogglesPause: !isSearching && !showingGuide && !showingFollowing,
                 programmes: epg.guide.nowAndNext(channelID: selectedChannel?.tvgID, at: now),
@@ -883,6 +890,10 @@ private struct PlayerPane: View {
     let zap: (Int) -> Void
     /// Plays the current programme from its start, from the channel's archive; nil when there is none.
     let startOver: (() -> Void)?
+    /// How far back the channel's archive reaches; nil when it has none.
+    let archiveDays: Int?
+    /// Plays the channel's archive from a time picked by hand, for so many minutes.
+    let watchFrom: (Date, Int) -> Void
     /// Off while the search field has focus, so a space (and M, + and −) can be typed there.
     let spaceTogglesPause: Bool
     let programmes: (now: Programme?, next: Programme?)
@@ -894,6 +905,7 @@ private struct PlayerPane: View {
     @StateObject private var player = MPVPlayer()
     @EnvironmentObject private var playback: PlaybackCommands
     @State private var showsControls = true
+    @State private var showsWatchFrom = false
     @State private var isOverControls = false
     @State private var hideTask: Task<Void, Never>?
     /// Slider value while the user is dragging the seek bar.
@@ -1170,6 +1182,17 @@ private struct PlayerPane: View {
                     Image(systemName: "gobackward")
                 }
                 .help("Watch this programme from the start")
+            }
+            if let archiveDays, let channel {
+                Button {
+                    showsWatchFrom = true
+                } label: {
+                    Image(systemName: "clock.arrow.circlepath")
+                }
+                .help("Watch from an earlier time, from the channel's archive")
+                .popover(isPresented: $showsWatchFrom, arrowEdge: .top) {
+                    WatchFromPicker(channelName: channel.name, days: archiveDays, play: watchFrom)
+                }
             }
             Button(action: toggleFavourite) {
                 Image(systemName: isFavourite ? "star.fill" : "star")

@@ -81,4 +81,18 @@ final class XtreamPanelTests: XCTestCase {
         XCTAssertTrue(recording.isArchive)
         XCTAssertEqual(recording.kind, .movie)
     }
+
+    func testArchiveFromATimePickedByHand() {
+        let channel = Channel(id: 1, name: "One", url: "http://host/live/u/p/42.ts", group: "", logo: nil, tvgID: nil, kind: .live)
+        let catchUp = CatchUp(style: "xc", days: 2, source: nil, timeZone: "Europe/Stockholm")
+        let now = ISO8601DateFormatter().date(from: "2026-10-07T10:00:00Z")!
+        let start = ISO8601DateFormatter().date(from: "2026-10-06T18:00:00Z")!
+
+        let recording = channel.archived(from: start, minutes: 120, catchUp: catchUp, now: now)
+        XCTAssertEqual(recording?.url, "http://host/timeshift/u/p/120/2026-10-06:20-00/42.ts")
+        XCTAssertEqual(recording?.isArchive, true)
+        // Not yet been, and further back than the archive reaches.
+        XCTAssertNil(channel.archived(from: now.addingTimeInterval(60), minutes: 30, catchUp: catchUp, now: now))
+        XCTAssertNil(channel.archived(from: now.addingTimeInterval(-3 * 86_400), minutes: 30, catchUp: catchUp, now: now))
+    }
 }
