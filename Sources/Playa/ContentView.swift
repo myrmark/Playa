@@ -982,6 +982,7 @@ private struct PlayerPane: View {
                 player.volume = min(max(player.volume + change, 0), 100)
             }
             playback.setSleepTimer = { player.setSleepTimer(minutes: $0) }
+            playback.skip = { skip($0) }
             nowPlaying.togglePause = { player.togglePause() }
             nowPlaying.zap = zap
         }
@@ -999,6 +1000,10 @@ private struct PlayerPane: View {
         .onChange(of: player.isPaused || isHeld, initial: true) { _, paused in playback.isPaused = paused }
         .onChange(of: player.isMuted, initial: true) { _, muted in playback.isMuted = muted }
         .onChange(of: player.sleepAt, initial: true) { _, date in playback.sleepAt = date }
+        .onChange(of: skipAmounts?.small, initial: true) {
+            playback.skipSmall = skipAmounts?.small ?? 0
+            playback.skipBig = skipAmounts?.big ?? 0
+        }
         // The sleep timer has closed the stream: offer to play again rather than reopen it.
         .onChange(of: player.sleptAt) {
             savePosition(isFinal: true)
@@ -1094,6 +1099,40 @@ private struct PlayerPane: View {
         }
         .font(.caption.monospacedDigit())
         .foregroundStyle(.secondary)
+    }
+
+    /// The two sizes of skip, in seconds; nil when there is nothing to skip in. A recording from
+    /// the archive can only be entered on a whole minute, so its skips are whole minutes.
+    private var skipAmounts: (small: Int, big: Int)? {
+        guard let playing, playing.kind != .live, !isHeld, player.duration > 0 else { return nil }
+        return playing.recording != nil ? (60, 300) : (15, 60)
+    }
+
+    private func skip(_ seconds: Int) {
+        guard player.duration > 0 else { return }
+        var target = player.position + Double(seconds)
+        if playing?.recording != nil {
+            // Counted in whole minutes from the one playing, so every press moves the same way.
+            target = ((player.position / 60).rounded(.down) + Double(seconds / 60)) * 60
+        }
+        player.seek(to: min(max(target, 0), player.duration - 1))
+    }
+
+    private static func skipName(_ seconds: Int) -> String {
+        let amount = abs(seconds)
+        return amount < 60 ? "\(amount) Seconds" : amount == 60 ? "1 Minute" : "\(amount / 60) Minutes"
+    }
+
+    private func skipButton(_ seconds: Int, key: String) -> some View {
+        let amount = abs(seconds)
+        return Button {
+            skip(seconds)
+        } label: {
+            Text((seconds < 0 ? "−" : "+") + (amount < 60 ? "\(amount)s" : "\(amount / 60)m"))
+                .font(.caption.monospacedDigit())
+                .frame(minWidth: 30)
+        }
+        .help("Skip \(seconds < 0 ? "back" : "forward") \(Self.skipName(seconds).lowercased()) (\(key))")
     }
 
     /// What the timeline shows under the pointer. A recording is jumped in by the minute, and
@@ -1193,6 +1232,14 @@ private struct PlayerPane: View {
                     Image(systemName: "backward.end.fill")
                 }
                 .help("Start from the beginning")
+                if let amounts = skipAmounts {
+                    HStack(spacing: 4) {
+                        skipButton(-amounts.big, key: "⇧←")
+                        skipButton(-amounts.small, key: "←")
+                        skipButton(amounts.small, key: "→")
+                        skipButton(amounts.big, key: "⇧→")
+                    }
+                }
             } else {
                 Button {
                     zap(-1)

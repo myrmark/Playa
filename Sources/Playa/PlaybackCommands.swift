@@ -16,6 +16,9 @@ final class PlaybackCommands: ObservableObject {
     /// The channel before the current one, to switch back to.
     @Published var lastChannelName: String?
     @Published var sleepAt: Date?
+    /// The two sizes of skip in what is playing, in seconds; 0 when there is nothing to skip in.
+    @Published var skipSmall = 0
+    @Published var skipBig = 0
 
     var togglePause: () -> Void = {}
     var toggleMute: () -> Void = {}
@@ -27,6 +30,13 @@ final class PlaybackCommands: ObservableObject {
     var refreshGuide: () -> Void = {}
     var showFollowing: () -> Void = {}
     var setSleepTimer: (Int?) -> Void = { _ in }
+    /// Skips so many seconds forward, or back when negative.
+    var skip: (Int) -> Void = { _ in }
+}
+
+private func skipTitle(_ seconds: Int, forward: Bool) -> String {
+    let amount = seconds < 60 ? "\(seconds) Seconds" : seconds == 60 ? "1 Minute" : "\(seconds / 60) Minutes"
+    return "Skip \(forward ? "Forward" : "Back") \(seconds > 0 ? amount : "")".trimmingCharacters(in: .whitespaces)
 }
 
 struct PlaybackMenu: Commands {
@@ -47,6 +57,20 @@ struct PlaybackMenu: Commands {
             Button(commands.lastChannelName.map { "Back to \($0)" } ?? "Back to Last Channel", action: commands.backToLastChannel)
                 .keyboardShortcut("[", modifiers: .command)
                 .disabled(commands.lastChannelName == nil)
+            Divider()
+            // The arrow keys must stay with the text field while something is being typed.
+            Button(skipTitle(commands.skipSmall, forward: false)) { commands.skip(-commands.skipSmall) }
+                .keyboardShortcut(.leftArrow, modifiers: [])
+                .disabled(commands.skipSmall == 0 || !commands.keysFree)
+            Button(skipTitle(commands.skipSmall, forward: true)) { commands.skip(commands.skipSmall) }
+                .keyboardShortcut(.rightArrow, modifiers: [])
+                .disabled(commands.skipSmall == 0 || !commands.keysFree)
+            Button(skipTitle(commands.skipBig, forward: false)) { commands.skip(-commands.skipBig) }
+                .keyboardShortcut(.leftArrow, modifiers: .shift)
+                .disabled(commands.skipBig == 0 || !commands.keysFree)
+            Button(skipTitle(commands.skipBig, forward: true)) { commands.skip(commands.skipBig) }
+                .keyboardShortcut(.rightArrow, modifiers: .shift)
+                .disabled(commands.skipBig == 0 || !commands.keysFree)
             Divider()
             Button(commands.isMuted ? "Unmute" : "Mute", action: commands.toggleMute)
                 .keyboardShortcut("m", modifiers: [])
