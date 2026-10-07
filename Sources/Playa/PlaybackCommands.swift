@@ -10,6 +10,7 @@ final class PlaybackCommands: ObservableObject {
     @Published var isMuted = false
     @Published var isLive = true
     @Published var hasGuide = false
+    @Published var canRefreshGuide = false
     /// Off while a text field is being typed in, where plain keys like Space and M must type.
     @Published var keysFree = true
     /// The channel before the current one, to switch back to.
@@ -23,6 +24,7 @@ final class PlaybackCommands: ObservableObject {
     var backToLastChannel: () -> Void = {}
     var toggleFavourite: () -> Void = {}
     var showGuide: () -> Void = {}
+    var refreshGuide: () -> Void = {}
     var showFollowing: () -> Void = {}
     var setSleepTimer: (Int?) -> Void = { _ in }
 }
@@ -62,6 +64,9 @@ struct PlaybackMenu: Commands {
             Button("TV Guide", action: commands.showGuide)
                 .keyboardShortcut("g", modifiers: .command)
                 .disabled(!commands.hasGuide)
+            Button("Refresh TV Guide", action: commands.refreshGuide)
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+                .disabled(!commands.canRefreshGuide)
             Button("Following", action: commands.showFollowing)
                 .keyboardShortcut("f", modifiers: [.command, .shift])
             Divider()

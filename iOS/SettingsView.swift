@@ -58,6 +58,8 @@ struct SettingsView: View {
                         }
                     }
                     LabeledContent("TV guide", value: guideStatus)
+                    Button("Refresh TV Guide") { epg.refresh() }
+                        .disabled(!epg.canRefresh)
                 }
 
                 Section {

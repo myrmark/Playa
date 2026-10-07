@@ -26,7 +26,11 @@ struct SettingsView: View {
                     }
                 }
                 Section {
-                    row("TV Guide", systemImage: "calendar", value: guideStatus)
+                    // Pressing it asks the provider for the guide again.
+                    Button { epg.refresh() } label: {
+                        row("TV Guide", systemImage: "calendar", value: guideStatus)
+                    }
+                    .disabled(!epg.canRefresh)
                     NavigationLink { SyncInfo() } label: {
                         row("iCloud Sync", systemImage: "icloud", value: nil)
                     }

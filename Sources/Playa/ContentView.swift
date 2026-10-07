@@ -372,6 +372,7 @@ struct ContentView: View {
         .onChange(of: !isSearching && !showingGuide && !showingFollowing, initial: true) { _, free in
             playback.keysFree = free
         }
+        .onChange(of: epg.status, initial: true) { playback.canRefreshGuide = epg.canRefresh }
         .onChange(of: epg.version, initial: true) {
             playback.hasGuide = !epg.guide.isEmpty
             // Keeps the reminders for followed broadcasts up to date with the guide.
@@ -392,6 +393,7 @@ struct ContentView: View {
                 showingFollowing = false
                 showingGuide.toggle()
             }
+            playback.refreshGuide = { epg.refresh() }
             playback.showFollowing = {
                 showingGuide = false
                 showingFollowing.toggle()
@@ -675,11 +677,16 @@ struct ContentView: View {
             .foregroundStyle(.secondary)
             .padding(6)
         case .failed(let message):
-            Text("TV guide unavailable: \(message)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .padding(6)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("TV guide unavailable: \(message)")
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                Button("Try Again") { epg.refresh() }
+                    .buttonStyle(.link)
+                    .help("Ask for the TV guide again. Playa also tries by itself every quarter of an hour.")
+            }
+            .font(.caption)
+            .padding(6)
         case .unavailable, .loaded:
             EmptyView()
         }

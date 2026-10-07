@@ -23,6 +23,18 @@ final class EPGStore: ObservableObject {
     private var loadedAt = Date.distantPast
     private var loadTask: Task<Void, Never>?
 
+    /// What the guide is loaded from and for, kept so it can be fetched again.
+    private struct Request {
+        let url: URL
+        let cacheFile: URL
+        let wanted: Set<String>
+        let archiveDays: [String: Int]
+    }
+    private var request: Request?
+    private var refreshTask: Task<Void, Never>?
+    /// How soon the server is asked again when it had no usable guide.
+    private static let retryDelay: TimeInterval = 900
+
     /// - Parameter archiveDays: days of archive by lowercased guide id; programmes of those channels
     ///   are kept that far back, so they can be watched from the archive.
     func load(for saved: SavedPlaylist?, playlist: Playlist, archiveDays: [String: Int] = [:]) {
@@ -34,18 +46,36 @@ final class EPGStore: ObservableObject {
            status == .loading || Date().timeIntervalSince(loadedAt) < Self.maxAge {
             return
         }
-        loadedArchiveDays = archiveDays
-        let now = Date()
-        let keepPast = archiveDays.mapValues { now.addingTimeInterval(-Double($0) * 86_400) }
-        loadTask?.cancel()
         let wanted = Set(playlist.channels.compactMap { $0.tvgID?.lowercased() })
         guard !wanted.isEmpty, let url = EPGLocator.guideURL(playlistURL: saved.url, advertised: playlist.epgURL) else {
             reset(to: .unavailable)
             return
         }
         reset(to: .loading)
+        loadedArchiveDays = archiveDays
         loadedPlaylistID = saved.id
-        let cacheFile = Self.cacheFile(for: saved.id)
+        request = Request(url: url, cacheFile: Self.cacheFile(for: saved.id), wanted: wanted, archiveDays: archiveDays)
+        start(downloading: false)
+    }
+
+    /// Whether there is a guide address to ask, so `refresh` can do something.
+    var canRefresh: Bool { request != nil && status != .loading }
+
+    /// Fetches the guide from the server again now. The guide on show stays until the new one is in.
+    func refresh() {
+        guard canRefresh else { return }
+        status = .loading
+        start(downloading: true)
+    }
+
+    /// - Parameter downloading: fetch a new guide even when the stored one is recent.
+    private func start(downloading: Bool) {
+        guard let request else { return }
+        let (url, cacheFile, wanted) = (request.url, request.cacheFile, request.wanted)
+        let now = Date()
+        let keepPast = request.archiveDays.mapValues { now.addingTimeInterval(-Double($0) * 86_400) }
+        loadTask?.cancel()
+        refreshTask?.cancel()
 
         loadTask = Task {
             func parse(_ file: URL) async -> (guide: Guide, report: GuideReport) {
@@ -63,7 +93,7 @@ final class EPGStore: ObservableObject {
             let modified = (try? cacheFile.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
             /// Why a new guide couldn't be had, when that was tried and failed.
             var problem: String?
-            if modified.map({ Date().timeIntervalSince($0) > Self.maxAge }) ?? true {
+            if downloading || modified.map({ Date().timeIntervalSince($0) > Self.maxAge }) ?? true {
                 // The new guide replaces the old one only once it has been read and found to
                 // cover this playlist: a broken or empty download must not cost the last good one.
                 let incoming = cacheFile.appendingPathExtension("new")
@@ -102,8 +132,24 @@ final class EPGStore: ObservableObject {
                     return
                 }
             }
-            loadedPlaylistID = nil
+            // The next load of the playlist asks again too.
+            loadedAt = .distantPast
+            if !guide.isEmpty {
+                guide = Guide()
+                version += 1
+            }
             status = .failed(problem ?? "The guide has no programmes for this playlist's channels.")
+            refreshLater(after: Self.retryDelay)
+        }
+    }
+
+    /// Keeps the guide up to date by itself while the app is open.
+    private func refreshLater(after delay: TimeInterval) {
+        refreshTask?.cancel()
+        refreshTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled else { return }
+            self?.refresh()
         }
     }
 
@@ -120,12 +166,15 @@ final class EPGStore: ObservableObject {
         version += 1
         // An old guide kept because the new one failed is good for a quarter of an hour, then
         // the server is asked again.
-        loadedAt = retryingSoon ? Date().addingTimeInterval(900 - Self.maxAge) : Date()
+        loadedAt = retryingSoon ? Date().addingTimeInterval(Self.retryDelay - Self.maxAge) : Date()
         status = .loaded
+        refreshLater(after: retryingSoon ? Self.retryDelay : Self.maxAge)
     }
 
     private func reset(to status: Status) {
         loadTask?.cancel()
+        refreshTask?.cancel()
+        request = nil
         loadedPlaylistID = nil
         if !guide.isEmpty {
             guide = Guide()
