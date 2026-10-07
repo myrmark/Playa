@@ -363,7 +363,8 @@ struct ContentView: View {
                 holdsPlayback = false
                 lastChannel = old
             }
-            if let channel { store.lastChannelURL = channel.url }
+            // A recording from the archive isn't in the playlist, so it can't be reopened at launch.
+            if let channel, !channel.isArchive { store.lastChannelURL = channel.url }
             playback.hasChannel = channel != nil
             playback.isLive = channel?.kind != .series && channel?.kind != .movie
             playback.lastChannelName = lastChannel?.name
