@@ -48,10 +48,10 @@ final class EPGStore: ObservableObject {
         let cacheFile = Self.cacheFile(for: saved.id)
 
         loadTask = Task {
-            func parse(_ file: URL) async -> Guide {
-                await Task.detached(priority: .utility) { () -> Guide in
-                    guard let stream = InputStream(url: file) else { return Guide() }
-                    return XMLTVParser.parse(
+            func parse(_ file: URL) async -> (guide: Guide, report: GuideReport) {
+                await Task.detached(priority: .utility) { () -> (guide: Guide, report: GuideReport) in
+                    guard let stream = InputStream(url: file) else { return (Guide(), GuideReport()) }
+                    return XMLTVParser.read(
                         stream: stream,
                         wantedChannels: wanted,
                         keepEndingAfter: Date().addingTimeInterval(-3600),
@@ -78,13 +78,13 @@ final class EPGStore: ObservableObject {
                     try FileManager.default.moveItem(at: downloaded, to: incoming)
                     let fresh = await parse(incoming)
                     guard !Task.isCancelled else { return }
-                    if !fresh.isEmpty {
+                    if !fresh.guide.isEmpty {
                         _ = try FileManager.default.replaceItemAt(cacheFile, withItemAt: incoming)
-                        apply(fresh, retryingSoon: false)
+                        apply(fresh.guide, retryingSoon: false)
                         return
                     }
                     try? FileManager.default.removeItem(at: incoming)
-                    problem = "The guide the provider sent has no programmes for this playlist's channels."
+                    problem = fresh.report.problem
                 } catch {
                     try? FileManager.default.removeItem(at: incoming)
                     guard !Task.isCancelled else { return }
@@ -95,7 +95,7 @@ final class EPGStore: ObservableObject {
             // The guide on disk: still fresh, or the last good one while the provider's is unusable.
             // A guide covers several days, so an older one is still worth showing.
             if FileManager.default.fileExists(atPath: cacheFile.path) {
-                let stored = await parse(cacheFile)
+                let stored = await parse(cacheFile).guide
                 guard !Task.isCancelled else { return }
                 if !stored.isEmpty {
                     apply(stored, retryingSoon: problem != nil)

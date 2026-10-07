@@ -120,7 +120,38 @@ public enum EPGLocator {
     }
 }
 
+/// What a guide file held, for saying why one was of no use.
+public struct GuideReport: Equatable, Sendable {
+    /// Every programme in the file, on any channel.
+    public var programmes = 0
+    /// Those on the wanted channels, whenever they are.
+    public var onWantedChannels = 0
+    /// When the last of those ends.
+    public var lastStop: Date?
+    /// The line the file stops being readable XML at, if it does.
+    public var brokenAtLine: Int?
+
+    public init() {}
+
+    /// Why a guide that gave no programmes didn't.
+    public var problem: String {
+        var text: String
+        if programmes == 0 {
+            text = "The guide the provider sent has no programmes."
+        } else if onWantedChannels == 0 {
+            text = "The guide the provider sent has \(programmes) programmes, none for this playlist's channels."
+        } else if let lastStop {
+            text = "The guide the provider sent is out of date: it ends \(lastStop.formatted(date: .abbreviated, time: .shortened))."
+        } else {
+            text = "The guide the provider sent has no programmes for this playlist's channels."
+        }
+        if let brokenAtLine { text += " The file is broken at line \(brokenAtLine)." }
+        return text
+    }
+}
+
 public final class XMLTVParser: NSObject, XMLParserDelegate {
+    private var report = GuideReport()
     private let wantedChannels: Set<String>?
     private let keepEndingAfter: Date
     /// Earlier cut-offs for some channels, such as those with an archive to watch from.
@@ -140,11 +171,18 @@ public final class XMLTVParser: NSObject, XMLParserDelegate {
     ///   - keepEndingAfter: programmes that ended before this are dropped.
     ///   - keepPast: for these lowercased channel ids, programmes are kept back to the given date instead.
     public static func parse(stream: InputStream, wantedChannels: Set<String>?, keepEndingAfter: Date, keepPast: [String: Date] = [:]) -> Guide {
+        read(stream: stream, wantedChannels: wantedChannels, keepEndingAfter: keepEndingAfter, keepPast: keepPast).guide
+    }
+
+    /// As `parse`, and also tells what the file held.
+    public static func read(
+        stream: InputStream, wantedChannels: Set<String>?, keepEndingAfter: Date, keepPast: [String: Date] = [:]
+    ) -> (guide: Guide, report: GuideReport) {
         let delegate = XMLTVParser(wantedChannels: wantedChannels, keepEndingAfter: keepEndingAfter, keepPast: keepPast)
         let parser = XMLParser(stream: stream)
         parser.delegate = delegate
-        parser.parse()
-        return Guide(programmes: delegate.programmes)
+        if !parser.parse() { delegate.report.brokenAtLine = parser.lineNumber }
+        return (Guide(programmes: delegate.programmes), delegate.report)
     }
 
     private init(wantedChannels: Set<String>?, keepEndingAfter: Date, keepPast: [String: Date]) {
@@ -159,12 +197,16 @@ public final class XMLTVParser: NSObject, XMLParserDelegate {
     ) {
         if elementName == "programme" {
             currentChannel = nil
+            report.programmes += 1
             guard let channel = attributes["channel"]?.lowercased(),
-                  wantedChannels?.contains(channel) ?? true,
-                  let start = attributes["start"].flatMap(Self.date(from:)),
-                  let stop = attributes["stop"].flatMap(Self.date(from:)),
-                  stop > (keepPast[channel] ?? keepEndingAfter)
+                  wantedChannels?.contains(channel) ?? true
             else { return }
+            report.onWantedChannels += 1
+            guard let start = attributes["start"].flatMap(Self.date(from:)),
+                  let stop = attributes["stop"].flatMap(Self.date(from:))
+            else { return }
+            report.lastStop = max(report.lastStop ?? stop, stop)
+            guard stop > (keepPast[channel] ?? keepEndingAfter) else { return }
             currentChannel = channel
             currentStart = start
             currentStop = stop

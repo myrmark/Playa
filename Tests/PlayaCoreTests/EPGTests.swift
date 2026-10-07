@@ -103,4 +103,29 @@ final class EPGTests: XCTestCase {
         )
         XCTAssertNil(EPGLocator.guideURL(playlistURL: "file:///Users/me/tv/sport.m3u", advertised: nil))
     }
+
+    func testTellsWhyAGuideGaveNothing() {
+        let now = ISO8601DateFormatter().date(from: "2026-10-02T18:30:00Z")!
+        func report(_ xml: String) -> GuideReport {
+            XMLTVParser.read(stream: InputStream(data: Data(xml.utf8)), wantedChannels: ["svt1.se"], keepEndingAfter: now).report
+        }
+
+        let elsewhere = report("""
+        <tv><programme start="20261002180000 +0000" stop="20261002190000 +0000" channel="other.se"><title>A</title></programme></tv>
+        """)
+        XCTAssertEqual(elsewhere.programmes, 1)
+        XCTAssertEqual(elsewhere.onWantedChannels, 0)
+        XCTAssertTrue(elsewhere.problem.contains("none for this playlist's channels"))
+
+        let old = report("""
+        <tv><programme start="20261001180000 +0000" stop="20261001190000 +0000" channel="SVT1.se"><title>A</title></programme></tv>
+        """)
+        XCTAssertEqual(old.onWantedChannels, 1)
+        XCTAssertEqual(old.lastStop, ISO8601DateFormatter().date(from: "2026-10-01T19:00:00Z"))
+        XCTAssertTrue(old.problem.contains("out of date"))
+
+        let broken = report("<tv>\n<programme start=\"2026")
+        XCTAssertEqual(broken.programmes, 0)
+        XCTAssertNotNil(broken.brokenAtLine)
+    }
 }
