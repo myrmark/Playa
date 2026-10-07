@@ -906,6 +906,7 @@ private struct PlayerPane: View {
     @EnvironmentObject private var playback: PlaybackCommands
     @State private var showsControls = true
     @State private var showsWatchFrom = false
+    @State private var nowPlaying = NowPlaying()
     @State private var isOverControls = false
     @State private var hideTask: Task<Void, Never>?
     /// Slider value while the user is dragging the seek bar.
@@ -979,6 +980,19 @@ private struct PlayerPane: View {
                 player.volume = min(max(player.volume + change, 0), 100)
             }
             playback.setSleepTimer = { player.setSleepTimer(minutes: $0) }
+            nowPlaying.togglePause = { player.togglePause() }
+            nowPlaying.zap = zap
+        }
+        .onChange(of: NowPlayingState(
+            title: isHeld ? nil : playing?.name, detail: playing?.kind == .live ? programmes.now?.title : nil,
+            isPaused: player.isPaused, isLive: playing?.kind == .live,
+            // A film's position is passed on again every quarter of a minute, and so after a jump.
+            step: playing?.kind == .live || player.duration <= 0 ? -1 : Int(player.position) / 15
+        ), initial: true) { _, state in
+            nowPlaying.update(
+                title: state.title, detail: state.detail, isPaused: state.isPaused, isLive: state.isLive,
+                position: player.position, duration: player.duration
+            )
         }
         .onChange(of: player.isPaused || isHeld, initial: true) { _, paused in playback.isPaused = paused }
         .onChange(of: player.isMuted, initial: true) { _, muted in playback.isMuted = muted }
@@ -1234,6 +1248,15 @@ private struct PlayerPane: View {
         }
         .buttonStyle(.borderless)
     }
+}
+
+/// What the system is told about playback; a change in any of it is passed on.
+private struct NowPlayingState: Equatable {
+    var title: String?
+    var detail: String?
+    var isPaused: Bool
+    var isLive: Bool
+    var step: Int
 }
 
 private struct PlaylistSheet: View {
