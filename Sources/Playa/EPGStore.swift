@@ -48,28 +48,9 @@ final class EPGStore: ObservableObject {
         let cacheFile = Self.cacheFile(for: saved.id)
 
         loadTask = Task {
-            do {
-                let modified = (try? cacheFile.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-                var isStale = false
-                if modified.map({ Date().timeIntervalSince($0) > Self.maxAge }) ?? true {
-                    do {
-                        let (downloaded, response) = try await URLSession.shared.download(from: url)
-                        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                            throw URLError(.badServerResponse, userInfo: [
-                                NSLocalizedDescriptionKey: "The server answered with HTTP \(http.statusCode)."
-                            ])
-                        }
-                        try? FileManager.default.removeItem(at: cacheFile)
-                        try FileManager.default.moveItem(at: downloaded, to: cacheFile)
-                    } catch {
-                        // A guide covers several days, so the last one fetched is still worth
-                        // showing when the server can't be reached for a new one.
-                        guard modified != nil, !Task.isCancelled else { throw error }
-                        isStale = true
-                    }
-                }
-                let parsed = await Task.detached(priority: .utility) { () -> Guide in
-                    guard let stream = InputStream(url: cacheFile) else { return Guide() }
+            func parse(_ file: URL) async -> Guide {
+                await Task.detached(priority: .utility) { () -> Guide in
+                    guard let stream = InputStream(url: file) else { return Guide() }
                     return XMLTVParser.parse(
                         stream: stream,
                         wantedChannels: wanted,
@@ -77,26 +58,70 @@ final class EPGStore: ObservableObject {
                         keepPast: keepPast
                     )
                 }.value
+            }
+
+            let modified = (try? cacheFile.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            /// Why a new guide couldn't be had, when that was tried and failed.
+            var problem: String?
+            if modified.map({ Date().timeIntervalSince($0) > Self.maxAge }) ?? true {
+                // The new guide replaces the old one only once it has been read and found to
+                // cover this playlist: a broken or empty download must not cost the last good one.
+                let incoming = cacheFile.appendingPathExtension("new")
+                do {
+                    let (downloaded, response) = try await Self.session.download(from: url)
+                    if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                        throw URLError(.badServerResponse, userInfo: [
+                            NSLocalizedDescriptionKey: "The server answered with HTTP \(http.statusCode)."
+                        ])
+                    }
+                    try? FileManager.default.removeItem(at: incoming)
+                    try FileManager.default.moveItem(at: downloaded, to: incoming)
+                    let fresh = await parse(incoming)
+                    guard !Task.isCancelled else { return }
+                    if !fresh.isEmpty {
+                        _ = try FileManager.default.replaceItemAt(cacheFile, withItemAt: incoming)
+                        apply(fresh, retryingSoon: false)
+                        return
+                    }
+                    try? FileManager.default.removeItem(at: incoming)
+                    problem = "The guide the provider sent has no programmes for this playlist's channels."
+                } catch {
+                    try? FileManager.default.removeItem(at: incoming)
+                    guard !Task.isCancelled else { return }
+                    problem = error.localizedDescription
+                }
+            }
+
+            // The guide on disk: still fresh, or the last good one while the provider's is unusable.
+            // A guide covers several days, so an older one is still worth showing.
+            if FileManager.default.fileExists(atPath: cacheFile.path) {
+                let stored = await parse(cacheFile)
                 guard !Task.isCancelled else { return }
-                if parsed.isEmpty {
-                    // A broken download shouldn't be kept for the next 12 hours. An old guide that
-                    // has merely run out stays, in case the server is still down next time.
-                    if !isStale { try? FileManager.default.removeItem(at: cacheFile) }
-                    loadedPlaylistID = nil
-                    status = .failed("The guide has no programmes for this playlist's channels.")
+                if !stored.isEmpty {
+                    apply(stored, retryingSoon: problem != nil)
                     return
                 }
-                guide = parsed
-                version += 1
-                // An old guide is good for a quarter of an hour, then the server is asked again.
-                loadedAt = isStale ? Date().addingTimeInterval(900 - Self.maxAge) : Date()
-                status = .loaded
-            } catch {
-                guard !Task.isCancelled else { return }
-                loadedPlaylistID = nil
-                status = .failed(error.localizedDescription)
             }
+            loadedPlaylistID = nil
+            status = .failed(problem ?? "The guide has no programmes for this playlist's channels.")
         }
+    }
+
+    /// A slow or stalled guide server gives up after ten minutes instead of hanging on.
+    private static let session: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 60
+        configuration.timeoutIntervalForResource = 600
+        return URLSession(configuration: configuration)
+    }()
+
+    private func apply(_ parsed: Guide, retryingSoon: Bool) {
+        guide = parsed
+        version += 1
+        // An old guide kept because the new one failed is good for a quarter of an hour, then
+        // the server is asked again.
+        loadedAt = retryingSoon ? Date().addingTimeInterval(900 - Self.maxAge) : Date()
+        status = .loaded
     }
 
     private func reset(to status: Status) {
