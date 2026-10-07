@@ -11,6 +11,9 @@ struct SavedPlaylist: Identifiable, Codable, Hashable {
     /// For a playlist added from a file on the Mac: the sandbox's permission slip to read
     /// that file again in later sessions.
     var bookmark: Data?
+    /// The provider's other servers, as `scheme://host[:port]`: asked in turn for the TV guide
+    /// and the archive list when the server in `url` has none. Nil in data from before these existed.
+    var alternativeServers: [String]?
 }
 
 @MainActor
@@ -57,6 +60,8 @@ final class PlaylistStore: ObservableObject {
         struct Item: Codable {
             var name: String
             var url: String
+            /// Nil when a version from before alternative servers wrote the item.
+            var alternativeServers: [String]?
         }
 
         var updatedAt: Date
@@ -312,7 +317,7 @@ final class PlaylistStore: ObservableObject {
 
     private func pushPlaylists() {
         playlistsStamp = Date()
-        let items = syncablePlaylists.map { SyncedPlaylists.Item(name: $0.name, url: $0.url) }
+        let items = syncablePlaylists.map { SyncedPlaylists.Item(name: $0.name, url: $0.url, alternativeServers: $0.alternativeServers ?? []) }
         CloudSync.write(SyncedPlaylists(updatedAt: playlistsStamp, playlists: items), key: Self.savedKey)
     }
 
@@ -335,8 +340,10 @@ final class PlaylistStore: ObservableObject {
         for item in remote.playlists {
             if let index = saved.firstIndex(where: { $0.url == item.url }) {
                 saved[index].name = item.name
+                // An older version on another device doesn't know about them; keep this device's.
+                if let servers = item.alternativeServers { saved[index].alternativeServers = AlternativeServers.valid(servers) }
             } else {
-                saved.append(SavedPlaylist(name: item.name, url: item.url))
+                saved.append(SavedPlaylist(name: item.name, url: item.url, alternativeServers: item.alternativeServers.map(AlternativeServers.valid)))
             }
         }
         persist()
@@ -378,6 +385,17 @@ final class PlaylistStore: ObservableObject {
             saved = decoded
             activeID = defaults.string(forKey: Self.activeKey).flatMap(UUID.init(uuidString:))
             if Vault.open(stored) == nil { persist() }
+            // An early build took every word of a pasted message for a server.
+            var cleaned = false
+            for index in saved.indices {
+                guard let servers = saved[index].alternativeServers, AlternativeServers.valid(servers) != servers else { continue }
+                saved[index].alternativeServers = AlternativeServers.valid(servers)
+                cleaned = true
+            }
+            if cleaned {
+                persist()
+                pushPlaylists()
+            }
         } else if let legacyURL = defaults.string(forKey: "playlistURL"), !legacyURL.isEmpty {
             // Versions before multiple playlists stored a single URL.
             let migrated = SavedPlaylist(
@@ -425,7 +443,7 @@ final class PlaylistStore: ObservableObject {
     }
 
     /// Downloads and adds a playlist, then switches to it. Nothing is saved if it can't be loaded.
-    func add(name: String, url urlString: String) async -> Bool {
+    func add(name: String, url urlString: String, alternativeServers: [String] = []) async -> Bool {
         let urlString = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if let existing = saved.first(where: { $0.url == urlString }) {
@@ -433,6 +451,7 @@ final class PlaylistStore: ObservableObject {
             return false
         }
         var entry = SavedPlaylist(name: name.isEmpty ? Self.defaultName(for: urlString) : name, url: urlString)
+        entry.alternativeServers = AlternativeServers.valid(alternativeServers)
         #if os(macOS)
         if let fileURL = URL(string: urlString), fileURL.isFileURL {
             entry.bookmark = try? fileURL.bookmarkData(options: .withSecurityScope, includingResourceValuesForKeys: nil, relativeTo: nil)
@@ -449,12 +468,14 @@ final class PlaylistStore: ObservableObject {
 
     /// Renames a playlist or points it at another address. A new address is downloaded first
     /// and only kept if that works. Favourites and lists carry over where the channels do.
-    func edit(_ id: UUID, name: String, url urlString: String) async -> Bool {
+    /// - Parameter alternativeServers: nil leaves them as they are.
+    func edit(_ id: UUID, name: String, url urlString: String, alternativeServers: [String]? = nil) async -> Bool {
         let urlString = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let index = saved.firstIndex(where: { $0.id == id }) else { return false }
         var entry = saved[index]
         if !name.isEmpty { entry.name = name }
+        if let alternativeServers { entry.alternativeServers = AlternativeServers.valid(alternativeServers) }
         if urlString != entry.url {
             if let existing = saved.first(where: { $0.url == urlString && $0.id != id }) {
                 errorMessage = "“\(existing.name)” already uses this address."
@@ -543,10 +564,17 @@ final class PlaylistStore: ObservableObject {
         } else if activeID == entry.id {
             archive = ArchiveInfo()
         }
-        guard let panel = XtreamPanel(playlistURL: entry.url), let listURL = panel.liveStreamsURL else { return }
-        guard let (list, response) = try? await URLSession.shared.data(from: listURL),
-              (response as? HTTPURLResponse)?.statusCode == 200
-        else { return }
+        // The playlist's own server first, then its alternatives, until one answers.
+        let addresses = [entry.url] + (entry.alternativeServers ?? []).compactMap { AlternativeServers.address(entry.url, onServer: $0) }
+        var answer: (panel: XtreamPanel, list: Data)?
+        for address in addresses {
+            guard let panel = XtreamPanel(playlistURL: address), let listURL = panel.liveStreamsURL else { continue }
+            if let (list, response) = try? await URLSession.shared.data(from: listURL), (response as? HTTPURLResponse)?.statusCode == 200 {
+                answer = (panel, list)
+                break
+            }
+        }
+        guard let (panel, list) = answer else { return }
         var info = ArchiveInfo(days: await Task.detached { XtreamPanel.archiveDays(fromLiveStreams: list) }.value, fetchedAt: Date())
         if !info.days.isEmpty, let infoURL = panel.serverInfoURL, let (serverInfo, _) = try? await URLSession.shared.data(from: infoURL) {
             info.timeZone = XtreamPanel.timeZone(fromServerInfo: serverInfo)

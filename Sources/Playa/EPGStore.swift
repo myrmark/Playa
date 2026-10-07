@@ -25,7 +25,8 @@ final class EPGStore: ObservableObject {
 
     /// What the guide is loaded from and for, kept so it can be fetched again.
     private struct Request {
-        let url: URL
+        /// The guide's address, then the same guide on the playlist's alternative servers.
+        let urls: [URL]
         let cacheFile: URL
         let wanted: Set<String>
         let archiveDays: [String: Int]
@@ -42,19 +43,20 @@ final class EPGStore: ObservableObject {
             reset(to: .unavailable)
             return
         }
-        if saved.id == loadedPlaylistID, archiveDays == loadedArchiveDays,
+        let urls = EPGLocator.guideURLs(playlistURL: saved.url, advertised: playlist.epgURL, alternativeServers: saved.alternativeServers ?? [])
+        if saved.id == loadedPlaylistID, archiveDays == loadedArchiveDays, urls == request?.urls,
            status == .loading || Date().timeIntervalSince(loadedAt) < Self.maxAge {
             return
         }
         let wanted = Set(playlist.channels.compactMap { $0.tvgID?.lowercased() })
-        guard !wanted.isEmpty, let url = EPGLocator.guideURL(playlistURL: saved.url, advertised: playlist.epgURL) else {
+        guard !wanted.isEmpty, !urls.isEmpty else {
             reset(to: .unavailable)
             return
         }
         reset(to: .loading)
         loadedArchiveDays = archiveDays
         loadedPlaylistID = saved.id
-        request = Request(url: url, cacheFile: Self.cacheFile(for: saved.id), wanted: wanted, archiveDays: archiveDays)
+        request = Request(urls: urls, cacheFile: Self.cacheFile(for: saved.id), wanted: wanted, archiveDays: archiveDays)
         start(downloading: false)
     }
 
@@ -71,7 +73,7 @@ final class EPGStore: ObservableObject {
     /// - Parameter downloading: fetch a new guide even when the stored one is recent.
     private func start(downloading: Bool) {
         guard let request else { return }
-        let (url, cacheFile, wanted) = (request.url, request.cacheFile, request.wanted)
+        let (urls, cacheFile, wanted) = (request.urls, request.cacheFile, request.wanted)
         let now = Date()
         let keepPast = request.archiveDays.mapValues { now.addingTimeInterval(-Double($0) * 86_400) }
         loadTask?.cancel()
@@ -96,29 +98,35 @@ final class EPGStore: ObservableObject {
             if downloading || modified.map({ Date().timeIntervalSince($0) > Self.maxAge }) ?? true {
                 // The new guide replaces the old one only once it has been read and found to
                 // cover this playlist: a broken or empty download must not cost the last good one.
+                // The servers are asked one at a time, and the first usable guide is kept.
                 let incoming = cacheFile.appendingPathExtension("new")
-                do {
-                    let (downloaded, response) = try await Self.session.download(from: url)
-                    if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                        throw URLError(.badServerResponse, userInfo: [
-                            NSLocalizedDescriptionKey: "The server answered with HTTP \(http.statusCode)."
-                        ])
+                for url in urls {
+                    do {
+                        let (downloaded, response) = try await Self.session.download(from: url)
+                        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                            throw URLError(.badServerResponse, userInfo: [
+                                NSLocalizedDescriptionKey: "The server answered with HTTP \(http.statusCode)."
+                            ])
+                        }
+                        try? FileManager.default.removeItem(at: incoming)
+                        try FileManager.default.moveItem(at: downloaded, to: incoming)
+                        let fresh = await parse(incoming)
+                        guard !Task.isCancelled else { return }
+                        if !fresh.guide.isEmpty {
+                            _ = try FileManager.default.replaceItemAt(cacheFile, withItemAt: incoming)
+                            apply(fresh.guide, retryingSoon: false)
+                            return
+                        }
+                        try? FileManager.default.removeItem(at: incoming)
+                        problem = problem ?? fresh.report.problem
+                    } catch {
+                        try? FileManager.default.removeItem(at: incoming)
+                        guard !Task.isCancelled else { return }
+                        problem = problem ?? error.localizedDescription
                     }
-                    try? FileManager.default.removeItem(at: incoming)
-                    try FileManager.default.moveItem(at: downloaded, to: incoming)
-                    let fresh = await parse(incoming)
-                    guard !Task.isCancelled else { return }
-                    if !fresh.guide.isEmpty {
-                        _ = try FileManager.default.replaceItemAt(cacheFile, withItemAt: incoming)
-                        apply(fresh.guide, retryingSoon: false)
-                        return
-                    }
-                    try? FileManager.default.removeItem(at: incoming)
-                    problem = fresh.report.problem
-                } catch {
-                    try? FileManager.default.removeItem(at: incoming)
-                    guard !Task.isCancelled else { return }
-                    problem = error.localizedDescription
+                }
+                if urls.count > 1, let first = problem {
+                    problem = first + " The alternative servers had no usable guide either."
                 }
             }
 

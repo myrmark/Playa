@@ -324,6 +324,8 @@ struct ContentView: View {
         }
         // The provider's archive list arrives after the playlist; past programmes are then kept.
         .onChange(of: store.archive) { loadGuide(for: store.playlist) }
+        // Another server to ask is a reason to ask for the guide again.
+        .onChange(of: store.active?.alternativeServers) { loadGuide(for: store.playlist) }
         .onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { now = $0 }
         .onReceive(store.$favourites) { favourites in
             if filter == .favourites {
@@ -1218,6 +1220,9 @@ private struct PlaylistSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var urlText = ""
+    @State private var serversText = ""
+
+    private var isFile: Bool { urlText.trimmingCharacters(in: .whitespaces).hasPrefix("file:") }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1235,6 +1240,14 @@ private struct PlaylistSheet: View {
             }
             TextField("Name (optional)", text: $name)
                 .textFieldStyle(.roundedBorder)
+            if !isFile {
+                TextField("Alternative servers (optional), such as http://other.example", text: $serversText)
+                    .textFieldStyle(.roundedBorder)
+                Text("Other servers your provider gives for the same account, separated by commas. Playa asks them in turn, with the same login, when the address above has no TV guide.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             if let error = store.errorMessage {
                 Text(error)
@@ -1254,10 +1267,11 @@ private struct PlaylistSheet: View {
                     .keyboardShortcut(.cancelAction)
                 Button(editing == nil ? "Add" : "Save") {
                     Task {
+                        let servers = isFile ? [] : AlternativeServers.servers(from: serversText, besides: urlText)
                         let isDone = if let editing {
-                            await store.edit(editing.id, name: name, url: urlText)
+                            await store.edit(editing.id, name: name, url: urlText, alternativeServers: servers)
                         } else {
-                            await store.add(name: name, url: urlText)
+                            await store.add(name: name, url: urlText, alternativeServers: servers)
                         }
                         if isDone { dismiss() }
                     }
@@ -1273,6 +1287,7 @@ private struct PlaylistSheet: View {
             if let editing {
                 name = editing.name
                 urlText = editing.url
+                serversText = (editing.alternativeServers ?? []).joined(separator: ", ")
             }
         }
     }

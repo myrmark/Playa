@@ -72,6 +72,8 @@ struct RootView: View {
         }
         .task { await store.loadOnLaunch() }
         .onReceive(store.$playlist) { epg.load(for: store.active, playlist: $0) }
+        // Another server to ask, set on the Mac, is a reason to ask for the guide again.
+        .onChange(of: store.active?.alternativeServers) { epg.load(for: store.active, playlist: store.playlist) }
         // Keeps the reminders for followed broadcasts up to date with the guide.
         .onChange(of: epg.version) {
             if Reminders.isEnabled, !epg.guide.isEmpty {

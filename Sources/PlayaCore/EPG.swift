@@ -150,6 +150,78 @@ public struct GuideReport: Equatable, Sendable {
     }
 }
 
+extension EPGLocator {
+    /// The guide addresses to try in turn: the playlist's own, then the same guide on each of
+    /// the alternative servers. A guide the playlist advertises on some other host than its own
+    /// has no counterpart on them.
+    public static func guideURLs(playlistURL: String, advertised: String?, alternativeServers: [String]) -> [URL] {
+        guard let main = guideURL(playlistURL: playlistURL, advertised: advertised) else { return [] }
+        var urls = [main]
+        guard let home = URLComponents(string: playlistURL)?.host?.lowercased(), main.host?.lowercased() == home else { return urls }
+        for server in alternativeServers {
+            if let url = AlternativeServers.address(main.absoluteString, onServer: server).flatMap(URL.init(string:)), !urls.contains(url) {
+                urls.append(url)
+            }
+        }
+        return urls
+    }
+}
+
+/// Other servers of the same provider, which answer the same requests as the one in the
+/// playlist address. Kept as `scheme://host` or `scheme://host:port`.
+public enum AlternativeServers {
+    /// Tidies what was typed, such as "other.example", "http://other.example/" or a whole
+    /// playlist address, into a server. Nil when it isn't one: ordinary words in a pasted
+    /// message from the provider must not be taken for servers and sent the login.
+    public static func server(from text: String) -> String? {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: ".,;:!?()<>\"'")))
+        guard !text.isEmpty else { return nil }
+        guard let components = URLComponents(string: text.contains("://") ? text : "http://" + text),
+              let scheme = components.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              let host = components.host?.lowercased(), isServerName(host)
+        else { return nil }
+        return "\(scheme)://\(host)" + (components.port.map { ":\($0)" } ?? "")
+    }
+
+    /// A host name with a dot in it, or "localhost": letters, digits and hyphens between the dots.
+    private static func isServerName(_ host: String) -> Bool {
+        if host == "localhost" { return true }
+        let labels = host.split(separator: ".", omittingEmptySubsequences: false)
+        guard labels.count >= 2 else { return false }
+        return labels.allSatisfy { label in
+            !label.isEmpty && !label.hasPrefix("-") && !label.hasSuffix("-")
+                && label.utf8.allSatisfy { ($0 >= 97 && $0 <= 122) || ($0 >= 48 && $0 <= 57) || $0 == 45 }
+        }
+    }
+
+    /// Stored servers with anything that isn't one left out.
+    public static func valid(_ servers: [String]) -> [String] {
+        Self.servers(from: servers.joined(separator: " "))
+    }
+
+    /// The servers in a line of text, separated by commas or spaces, without repeats and
+    /// without the one `address` is on already.
+    public static func servers(from text: String, besides address: String = "") -> [String] {
+        let home = server(from: address)
+        var servers: [String] = []
+        for part in text.split(whereSeparator: { $0 == "," || $0 == ";" || $0.isWhitespace }) {
+            if let server = server(from: String(part)), server != home, !servers.contains(server) { servers.append(server) }
+        }
+        return servers
+    }
+
+    /// `address` moved to `server`: everything after the host stays as it is.
+    public static func address(_ address: String, onServer server: String) -> String? {
+        guard var components = URLComponents(string: address), components.scheme?.hasPrefix("http") == true,
+              let target = URLComponents(string: server), let host = target.host
+        else { return nil }
+        components.scheme = target.scheme
+        components.host = host
+        components.port = target.port
+        return components.string
+    }
+}
+
 public final class XMLTVParser: NSObject, XMLParserDelegate {
     private var report = GuideReport()
     private let wantedChannels: Set<String>?

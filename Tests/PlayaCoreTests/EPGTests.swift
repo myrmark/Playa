@@ -128,4 +128,35 @@ final class EPGTests: XCTestCase {
         XCTAssertEqual(broken.programmes, 0)
         XCTAssertNotNil(broken.brokenAtLine)
     }
+
+    func testAlternativeServers() {
+        XCTAssertEqual(AlternativeServers.server(from: " Other.example/ "), "http://other.example")
+        XCTAssertEqual(AlternativeServers.server(from: "https://other.example:8443/get.php?username=u"), "https://other.example:8443")
+        XCTAssertNil(AlternativeServers.server(from: "file:///tmp/a.m3u"))
+        // A pasted notice gives its servers and nothing else.
+        XCTAssertEqual(
+            AlternativeServers.servers(from: "Uppdatering! Vi har nu två URL online som ni kan använda, ska fungera. m3u - xtream codes smart tv: http://one.example:2095 http://10.0.0.7:2095, two.example."),
+            ["http://one.example:2095", "http://10.0.0.7:2095", "http://two.example"]
+        )
+        XCTAssertEqual(AlternativeServers.valid(["http://vi", "http://fungera.", "http://one.example:2095"]), ["http://one.example:2095"])
+        XCTAssertEqual(
+            AlternativeServers.servers(from: "b.example, http://c.example:81  b.example host", besides: "http://host/get.php?username=u"),
+            ["http://b.example", "http://c.example:81"]
+        )
+        XCTAssertEqual(
+            AlternativeServers.address("http://host:8080/get.php?username=u&password=p", onServer: "https://b.example"),
+            "https://b.example/get.php?username=u&password=p"
+        )
+
+        let playlist = "http://host:8080/get.php?username=u&password=p&type=m3u_plus"
+        XCTAssertEqual(
+            EPGLocator.guideURLs(playlistURL: playlist, advertised: nil, alternativeServers: ["http://b.example", "http://host:8080"]).map(\.absoluteString),
+            ["http://host:8080/xmltv.php?username=u&password=p", "http://b.example/xmltv.php?username=u&password=p"]
+        )
+        // A guide kept somewhere else has no copy on the provider's other servers.
+        XCTAssertEqual(
+            EPGLocator.guideURLs(playlistURL: playlist, advertised: "http://epg.example/guide.xml", alternativeServers: ["http://b.example"]).map(\.absoluteString),
+            ["http://epg.example/guide.xml"]
+        )
+    }
 }
