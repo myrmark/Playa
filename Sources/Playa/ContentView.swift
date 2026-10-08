@@ -984,7 +984,6 @@ private struct PlayerPane: View {
             playback.setSleepTimer = { player.setSleepTimer(minutes: $0) }
             playback.skip = { skip($0) }
             nowPlaying.togglePause = { player.togglePause() }
-            nowPlaying.zap = zap
         }
         .onChange(of: NowPlayingState(
             title: isHeld ? nil : playing?.name, detail: playing?.kind == .live ? programmes.now?.title : nil,

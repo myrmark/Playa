@@ -9,20 +9,18 @@ import MediaPlayer
 @MainActor
 final class NowPlaying {
     var togglePause: () -> Void = {}
-    /// Moves to the channel above (-1) or below (+1).
-    var zap: (Int) -> Void = { _ in }
 
     private var isOpen = false
     private var isPaused = false
-    private var isLive = true
 
     init() {
         let center = MPRemoteCommandCenter.shared()
         center.togglePlayPauseCommand.addTarget { [weak self] _ in self?.act { _ in true } ?? .commandFailed }
         center.playCommand.addTarget { [weak self] _ in self?.act { $0.isPaused } ?? .commandFailed }
         center.pauseCommand.addTarget { [weak self] _ in self?.act { !$0.isPaused } ?? .commandFailed }
-        center.nextTrackCommand.addTarget { [weak self] _ in self?.move(1) ?? .commandFailed }
-        center.previousTrackCommand.addTarget { [weak self] _ in self?.move(-1) ?? .commandFailed }
+        // Next and previous are left alone: a double press on a headphone must not change channel.
+        center.nextTrackCommand.isEnabled = false
+        center.previousTrackCommand.isEnabled = false
     }
 
     /// - Parameters:
@@ -38,7 +36,6 @@ final class NowPlaying {
         }
         isOpen = true
         self.isPaused = isPaused
-        self.isLive = isLive
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: title,
             MPNowPlayingInfoPropertyIsLiveStream: isLive,
@@ -58,16 +55,6 @@ final class NowPlaying {
             MainActor.assumeIsolated {
                 guard self.isOpen, wanted(self) else { return }
                 self.togglePause()
-            }
-        }
-        return .success
-    }
-
-    private nonisolated func move(_ offset: Int) -> MPRemoteCommandHandlerStatus {
-        DispatchQueue.main.async {
-            MainActor.assumeIsolated {
-                guard self.isOpen, self.isLive else { return }
-                self.zap(offset)
             }
         }
         return .success
