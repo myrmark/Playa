@@ -54,6 +54,29 @@ SYNC AND PRIVACY
 
 Screenshots show Big Buck Bunny (© copyright 2008, Blender Foundation / www.bigbuckbunny.org) and Sintel (© copyright Blender Foundation / durian.blender.org), both licensed under Creative Commons Attribution 3.0.
 
+## What's New in 1.1
+
+### All devices
+Catch-up: channels that keep an archive are marked ↺. Watch the programme that is on from its start, or choose "Watch from…" and pick a day and time yourself, which works even when the TV guide is empty. Jumping back and forth in a recording takes seconds.
+Go back to the channel you watched before.
+Sleep timer.
+The TV guide keeps itself up to date and can be refreshed on its own, without downloading the playlist again. If the provider has no usable guide, Playa says why and asks again every quarter of an hour.
+Alternative servers: if your provider gives more than one server for your account, Playa asks them in turn for the TV guide. Set on the Mac, used on all your devices.
+
+### Apple TV (add to "All devices")
+"From the start", "Watch from…" and the sleep timer are in the options, a swipe up while watching.
+
+### iPhone and iPad (add to "All devices")
+Reminders shortly before broadcasts you follow.
+The side buttons show a volume bar.
+
+### Mac (add to "All devices")
+A Playback menu with keyboard shortcuts for everything in the player.
+The play/pause key, AirPods and other headphone buttons now control Playa.
+Skip back and forward with buttons or the arrow keys, and see the time under the pointer on the timeline.
+Past programmes in the TV guide can be played from the archive. Swipe sideways on the trackpad to move through the guide.
+Reminders shortly before broadcasts you follow.
+
 ## What's New in 1.0.1
 
 ### All devices
