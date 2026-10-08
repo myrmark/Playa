@@ -136,6 +136,8 @@ On iPhone and iPad: the app opens on the Add Playlist screen. Paste the address 
 
 The demo playlist comes with an invented TV guide for its three demo channels, so the guide features can be tried: on Apple TV choose Show Guide in Live TV, on the Mac click the calendar button in the toolbar.
 
+New in 1.1: the sleep timer, "back to the last channel" and refreshing the TV guide can be tried with the demo playlist. The catch-up features ("from the start", "Watch from…") only appear on channels whose provider keeps an archive of past programmes; the demo playlist has none, so those buttons are not shown with it.
+
 The films visible in the screenshots are Big Buck Bunny and Sintel, open films by the Blender Foundation under the Creative Commons Attribution 3.0 licence, credited in the description.
 
 The source code is public at https://github.com/myrmark/Playa. Playback uses mpv and FFmpeg under the LGPL through the MPVKit package.
