@@ -906,6 +906,9 @@ private struct PlayerPane: View {
     @EnvironmentObject private var playback: PlaybackCommands
     @State private var showsControls = true
     @State private var showsWatchFrom = false
+    /// In a narrow window the controls keep to the essentials: the volume slider and the larger
+    /// skips are left out (the keys and the menu still do both).
+    @State private var isNarrow = false
     @State private var nowPlaying = NowPlaying()
     @State private var isOverControls = false
     @State private var hideTask: Task<Void, Never>?
@@ -1158,6 +1161,11 @@ private struct PlayerPane: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .background(.bar)
+        .onGeometryChange(for: Bool.self) { $0.size.width < 560 } action: { isNarrow = $0 }
+        // Changing the volume is asking to hear something.
+        .onChange(of: player.volume) {
+            if player.isMuted { player.isMuted = false }
+        }
     }
 
     /// Invisible buttons that give the volume its keys. "=" is where "+" sits unshifted on
@@ -1233,10 +1241,10 @@ private struct PlayerPane: View {
                 .help("Start from the beginning")
                 if let amounts = skipAmounts {
                     HStack(spacing: 4) {
-                        skipButton(-amounts.big, key: "⇧←")
+                        if !isNarrow { skipButton(-amounts.big, key: "⇧←") }
                         skipButton(-amounts.small, key: "←")
                         skipButton(amounts.small, key: "→")
-                        skipButton(amounts.big, key: "⇧→")
+                        if !isNarrow { skipButton(amounts.big, key: "⇧→") }
                     }
                 }
             } else {
@@ -1313,14 +1321,12 @@ private struct PlayerPane: View {
                     .frame(width: 22)
             }
             .help(player.isMuted ? "Unmute (M)" : "Mute (M)")
-            Slider(value: $player.volume, in: 0...100)
-                .frame(width: 120)
-                .opacity(player.isMuted ? 0.4 : 1)
-                .help("Volume (+ and −)")
-                // Changing the volume is asking to hear something.
-                .onChange(of: player.volume) {
-                    if player.isMuted { player.isMuted = false }
-                }
+            if !isNarrow {
+                Slider(value: $player.volume, in: 0...100)
+                    .frame(width: 120)
+                    .opacity(player.isMuted ? 0.4 : 1)
+                    .help("Volume (+ and −)")
+            }
             volumeKeys
         }
         .buttonStyle(.borderless)

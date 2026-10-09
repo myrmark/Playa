@@ -180,71 +180,118 @@ struct GuideView: View {
         rowGeneration += 1
     }
 
+    /// One row when the window is wide enough for it, otherwise two.
     private var header: some View {
-        HStack(spacing: 12) {
-            Text("TV Guide")
-                .font(.title3.bold())
-            Picker("Channels", selection: $filter) {
-                Text("All channels").tag(ChannelFilter.all)
-                Label("Favourites", systemImage: "star.fill").tag(ChannelFilter.favourites)
-                Label("Recently Watched", systemImage: "clock").tag(ChannelFilter.recent)
-                ForEach(lists) { list in
-                    Label(list.name, systemImage: "list.bullet").tag(ChannelFilter.list(list.id))
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                headerTitle
+                channelPicker
+                scheduleToggle
+                searchField
+                Spacer()
+                dayLabel
+                timeButtons
+                doneButton
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 12) {
+                    headerTitle
+                    channelPicker
+                    Spacer()
+                    timeButtons
+                    doneButton
                 }
-                Divider()
-                ForEach((playlist.groupsByKind[.live] ?? []).filter { !hiddenGroups.contains(PlaylistStore.hiddenKey(group: $0, kind: .live)) }, id: \.self) { group in
-                    Text(group).tag(ChannelFilter.group(group))
+                HStack(spacing: 12) {
+                    searchField
+                    scheduleToggle
+                    Spacer()
+                    dayLabel
                 }
             }
-            .labelsHidden()
-            .frame(maxWidth: 260)
-            Toggle("Only channels with a schedule", isOn: $onlyWithProgrammes)
-            HStack(spacing: 5) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                TextField("Search programmes", text: $searchText)
-                    .textFieldStyle(.plain)
-                    .onExitCommand { searchText = "" }
-                if !searchText.isEmpty {
-                    Button {
-                        searchText = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.horizontal, 7)
-            .padding(.vertical, 4)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
-            .frame(width: 220)
-
-            Spacer()
-
-            Text(windowStart.formatted(.dateTime.weekday(.wide).day().month(.wide)))
-                .foregroundStyle(.secondary)
-            ControlGroup {
-                Button {
-                    windowStart = max(windowStart.addingTimeInterval(-Self.step), earliestStart)
-                } label: {
-                    Label("Earlier", systemImage: "chevron.left")
-                }
-                .help(archiveDays > 0 ? "Earlier programmes; those on channels with catch-up can be watched" : "Earlier")
-                .disabled(windowStart <= earliestStart)
-                Button("Now") { windowStart = Self.currentWindowStart(for: now) }
-                Button {
-                    windowStart = windowStart.addingTimeInterval(Self.step)
-                } label: {
-                    Label("Later", systemImage: "chevron.right")
-                }
-            }
-            .fixedSize()
-            Button("Done", action: onClose)
-                .keyboardShortcut(.cancelAction)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+    }
+
+    private var headerTitle: some View {
+        Text("TV Guide")
+            .font(.title3.bold())
+            .fixedSize()
+    }
+
+    private var channelPicker: some View {
+        Picker("Channels", selection: $filter) {
+            Text("All channels").tag(ChannelFilter.all)
+            Label("Favourites", systemImage: "star.fill").tag(ChannelFilter.favourites)
+            Label("Recently Watched", systemImage: "clock").tag(ChannelFilter.recent)
+            ForEach(lists) { list in
+                Label(list.name, systemImage: "list.bullet").tag(ChannelFilter.list(list.id))
+            }
+            Divider()
+            ForEach((playlist.groupsByKind[.live] ?? []).filter { !hiddenGroups.contains(PlaylistStore.hiddenKey(group: $0, kind: .live)) }, id: \.self) { group in
+                Text(group).tag(ChannelFilter.group(group))
+            }
+        }
+        .labelsHidden()
+        .frame(maxWidth: 260)
+    }
+
+    private var scheduleToggle: some View {
+        Toggle("Only channels with a schedule", isOn: $onlyWithProgrammes)
+            .fixedSize()
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Search programmes", text: $searchText)
+                .textFieldStyle(.plain)
+                .onExitCommand { searchText = "" }
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+        .frame(width: 220)
+    }
+
+    private var dayLabel: some View {
+        Text(windowStart.formatted(.dateTime.weekday(.wide).day().month(.wide)))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+    }
+
+    private var timeButtons: some View {
+        ControlGroup {
+            Button {
+                windowStart = max(windowStart.addingTimeInterval(-Self.step), earliestStart)
+            } label: {
+                Label("Earlier", systemImage: "chevron.left")
+            }
+            .help(archiveDays > 0 ? "Earlier programmes; those on channels with catch-up can be watched" : "Earlier")
+            .disabled(windowStart <= earliestStart)
+            Button("Now") { windowStart = Self.currentWindowStart(for: now) }
+            Button {
+                windowStart = windowStart.addingTimeInterval(Self.step)
+            } label: {
+                Label("Later", systemImage: "chevron.right")
+            }
+        }
+        .fixedSize()
+    }
+
+    private var doneButton: some View {
+        Button("Done", action: onClose)
+            .keyboardShortcut(.cancelAction)
     }
 
     /// Half-hour marks, laid out on the same scale the rows draw their programmes with.
