@@ -17,8 +17,8 @@ struct PlayaApp: App {
                     ContentView()
                 }
             }
-            // Narrow enough for half of a 13-inch screen.
-            .frame(minWidth: 640, minHeight: 420)
+            // Small enough to sit in a corner of the screen; the controls thin out as it shrinks.
+            .frame(minWidth: 320, minHeight: 220)
             .environmentObject(lock)
             .environmentObject(playback)
         }

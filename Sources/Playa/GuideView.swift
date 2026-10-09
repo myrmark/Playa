@@ -208,6 +208,18 @@ struct GuideView: View {
                     dayLabel
                 }
             }
+            // A very small window: the least that still lets the guide be moved through and closed.
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    headerTitle
+                    Spacer(minLength: 0)
+                    doneButton
+                }
+                HStack(spacing: 8) {
+                    timeButtons
+                    channelPicker
+                }
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)

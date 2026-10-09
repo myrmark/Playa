@@ -70,6 +70,8 @@ struct ContentView: View {
     @State private var isFullScreen = false
     @State private var columnVisibility = NavigationSplitViewVisibility.all
     @State private var visibilityBeforeFullScreen = NavigationSplitViewVisibility.all
+    /// True while the channel list is hidden only because the window is too narrow for it.
+    @State private var sidebarHiddenForWidth = false
     @State private var holdsPlayback = false
     /// Advances once a minute so now/next labels follow the clock.
     @State private var now = Date()
@@ -175,6 +177,17 @@ struct ContentView: View {
         // Hiding the toolbar outright would also take the window buttons with it; instead it
         // slides down with the menu bar when the pointer reaches the top of the screen.
         .modifier(ToolbarOnHoverInFullScreen())
+        // The channel list needs some 240 points; in a window too narrow for it and the picture
+        // it steps aside, and returns when there is room again.
+        .onGeometryChange(for: Bool.self) { $0.size.width < 520 } action: { tooNarrow in
+            if tooNarrow, columnVisibility != .detailOnly {
+                sidebarHiddenForWidth = true
+                columnVisibility = .detailOnly
+            } else if !tooNarrow, sidebarHiddenForWidth, !isFullScreen {
+                sidebarHiddenForWidth = false
+                columnVisibility = .all
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.willEnterFullScreenNotification)) { _ in
             visibilityBeforeFullScreen = columnVisibility
             columnVisibility = .detailOnly
@@ -909,6 +922,8 @@ private struct PlayerPane: View {
     /// In a narrow window the controls keep to the essentials: the volume slider and the larger
     /// skips are left out (the keys and the menu still do both).
     @State private var isNarrow = false
+    /// In a very small one only play, the name and mute are left.
+    @State private var isTiny = false
     @State private var nowPlaying = NowPlaying()
     @State private var isOverControls = false
     @State private var hideTask: Task<Void, Never>?
@@ -1162,6 +1177,7 @@ private struct PlayerPane: View {
         .padding(.vertical, 8)
         .background(.bar)
         .onGeometryChange(for: Bool.self) { $0.size.width < 560 } action: { isNarrow = $0 }
+        .onGeometryChange(for: Bool.self) { $0.size.width < 400 } action: { isTiny = $0 }
         // Changing the volume is asking to hear something.
         .onChange(of: player.volume) {
             if player.isMuted { player.isMuted = false }
@@ -1232,7 +1248,9 @@ private struct PlayerPane: View {
             .help(player.isPaused || isHeld ? "Play (Space)" : "Pause (Space)")
             .disabled(channel == nil)
 
-            if let channel, channel.kind != .live {
+            if isTiny {
+                EmptyView()
+            } else if let channel, channel.kind != .live {
                 Button {
                     player.seek(to: 0)
                 } label: {
@@ -1276,13 +1294,13 @@ private struct PlayerPane: View {
                         .help(programmes.now?.description ?? "")
                 }
             }
-            if let startOver {
+            if let startOver, !isTiny {
                 Button(action: startOver) {
                     Image(systemName: "gobackward")
                 }
                 .help("Watch this programme from the start")
             }
-            if let archiveDays, let channel {
+            if let archiveDays, let channel, !isTiny {
                 Button {
                     showsWatchFrom = true
                 } label: {
@@ -1293,15 +1311,17 @@ private struct PlayerPane: View {
                     WatchFromPicker(channelName: channel.name, days: archiveDays, play: watchFrom)
                 }
             }
-            Button(action: toggleFavourite) {
-                Image(systemName: isFavourite ? "star.fill" : "star")
-                    .foregroundStyle(isFavourite ? Color.yellow : Color.secondary)
+            if !isTiny {
+                Button(action: toggleFavourite) {
+                    Image(systemName: isFavourite ? "star.fill" : "star")
+                        .foregroundStyle(isFavourite ? Color.yellow : Color.secondary)
+                }
+                .help(isFavourite ? "Remove from Favourites" : "Add to Favourites")
+                .disabled(channel == nil)
             }
-            .help(isFavourite ? "Remove from Favourites" : "Add to Favourites")
-            .disabled(channel == nil)
-            Spacer()
+            Spacer(minLength: 0)
 
-            if let sleepAt = player.sleepAt {
+            if let sleepAt = player.sleepAt, !isTiny {
                 Menu {
                     Button("Turn Off Sleep Timer") { player.setSleepTimer(minutes: nil) }
                 } label: {
@@ -1312,7 +1332,7 @@ private struct PlayerPane: View {
                 .fixedSize()
                 .help("The sleep timer stops playback at \(sleepAt.formatted(date: .omitted, time: .shortened))")
             }
-            trackMenu
+            if !isTiny { trackMenu }
             Button {
                 player.isMuted.toggle()
             } label: {
