@@ -7,6 +7,11 @@ public struct ChannelList: Identifiable, Codable, Hashable, Sendable {
     public var name: String
     /// In the order they were added, unless rearranged.
     public private(set) var keys: [String]
+    /// The channels stand in for each other: when the one playing keeps stalling, the next one in
+    /// the list takes over. Nil (off) in lists from before this existed.
+    public var backups: Bool?
+
+    public var usesBackups: Bool { backups ?? false }
 
     public init(id: UUID = UUID(), name: String, keys: [String] = []) {
         self.id = id

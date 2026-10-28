@@ -239,7 +239,7 @@ struct TwoPaneBrowser<Pane: View>: View {
             filterRow(.favourites, title: "Favourites", systemImage: "star.fill")
             filterRow(.recent, title: "Recently Watched", systemImage: "clock")
             ForEach(store.lists) { list in
-                filterRow(.list(list.id), title: list.name, systemImage: "list.bullet", list: list)
+                filterRow(.list(list.id), title: list.name, systemImage: list.usesBackups ? "arrow.triangle.swap" : "list.bullet", list: list)
             }
             Button {
                 listEditor.request = .new(adding: nil)
@@ -295,6 +295,10 @@ struct TwoPaneBrowser<Pane: View>: View {
             if let list {
                 Button("Rename…") { stayInColumn(); listEditor.request = .rename(list) }
                 Button("Delete List", role: .destructive) { stayInColumn(); listToDelete = list }
+                Button(list.usesBackups ? "Stop Using as Backup Channels" : "Use as Backup Channels") {
+                    stayInColumn()
+                    store.setBackups(!list.usesBackups, forList: list.id)
+                }
             }
             if case .group(let name) = filter {
                 // Hidden groups come back from Settings → Groups.
@@ -388,9 +392,15 @@ struct ChannelPane: View {
         }
     }
 
+    /// Whether the channels shown are a list of backups.
+    private var usesBackups: Bool {
+        guard case .list(let id) = filter else { return false }
+        return store.lists.first { $0.id == id }?.usesBackups ?? false
+    }
+
     @ViewBuilder
     private func row(for channel: Channel, in channels: [Channel], now: Date) -> some View {
-        let play = { session = PlayerSession(channels: channels, index: channels.firstIndex(of: channel) ?? 0) }
+        let play = { session = PlayerSession(channels: channels, index: channels.firstIndex(of: channel) ?? 0, backups: usesBackups) }
         if isGuide {
             Button(action: play) {
                 GuideRow(

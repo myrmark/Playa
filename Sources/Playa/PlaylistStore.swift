@@ -136,6 +136,11 @@ final class PlaylistStore: ObservableObject {
         updateList(id) { $0.name = name.trimmingCharacters(in: .whitespacesAndNewlines) }
     }
 
+    /// Whether the list's channels stand in for each other when one keeps failing.
+    func setBackups(_ on: Bool, forList id: UUID) {
+        updateList(id) { $0.backups = on ? true : nil }
+    }
+
     func deleteList(_ id: UUID) {
         lists.removeAll { $0.id == id }
         listsChanged()

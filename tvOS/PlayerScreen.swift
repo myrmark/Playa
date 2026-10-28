@@ -10,6 +10,8 @@ struct PlayerSession: Identifiable {
     var showKey: String?
     let channels: [Channel]
     let index: Int
+    /// The channels come from a list of backups: when one keeps failing, the next takes over.
+    var backups = false
 }
 
 struct PlayerScreen: View {
@@ -162,7 +164,27 @@ struct PlayerScreen: View {
             index = session.index
             start()
         }
-        .onDisappear(perform: close)
+                .onDisappear(perform: close)
+        .overlay(alignment: .top) {
+            if let notice = player.notice {
+                Text(notice)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 30)
+                    .padding(.vertical, 18)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+                    .padding(40)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.default, value: player.notice)
+        .onChange(of: player.backupRequest) { _, request in
+            let current = session.channels[index]
+            guard let request, recording == nil,
+                  let next = player.takeBackup(after: current, in: session.channels, stopped: request.stopped),
+                  let position = session.channels.firstIndex(of: next)
+            else { return }
+            switchTo(position)
+        }
         // A suspended app must not keep a stream open: on a single-stream subscription it would
         // collide with whatever is watched next on another device.
         .onChange(of: scenePhase) { _, phase in
@@ -374,7 +396,8 @@ struct PlayerScreen: View {
     }
 
     private func start() {
-        player.play(url: channel.url, startAt: resume.resumePosition(for: channel), isLive: isLive, recording: channel.recording)
+        player.play(url: channel.url, startAt: resume.resumePosition(for: channel), isLive: isLive,
+                    recording: channel.recording, hasBackups: session.backups && recording == nil)
         flashInfo()
         // Zapping past a channel shouldn't count as watching it.
         let started = channel

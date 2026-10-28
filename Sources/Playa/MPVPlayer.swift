@@ -20,7 +20,12 @@ final class MPVPlayer: ObservableObject {
     }
 
     @Published var isPaused = false { didSet { updateKeepAwake() } }
-    @Published var isBuffering = false { didSet { if isBuffering, !oldValue { bufferingStarted() } } }
+    @Published var isBuffering = false {
+        didSet {
+            if isBuffering, !oldValue { bufferingStarted() }
+            if !isBuffering, oldValue { bufferingEnded() }
+        }
+    }
     /// Why playback is waiting for data, once a speed check has found out. Only meaningful while
     /// `isBuffering`; nil while unknown.
     @Published private(set) var bufferingReason: BufferingReason?
@@ -220,7 +225,9 @@ final class MPVPlayer: ObservableObject {
     ///   - recording: for a recording from an archive, what it was cut from. Jumps then open the
     ///     archive again at the new time: jumping inside the open stream takes minutes, because
     ///     the server sends everything up to that point first.
-    func play(url: String, startAt start: Double? = nil, isLive: Bool = false, recording: Recording? = nil) {
+    ///   - hasBackups: a live channel from a list of backups. When it keeps stalling on the
+    ///     provider's side, or drops while reconnecting is allowed, `backupRequest` asks for the next one.
+    func play(url: String, startAt start: Double? = nil, isLive: Bool = false, recording: Recording? = nil, hasBackups: Bool = false) {
         self.recording = recording
         recordingOffset = 0
         currentURL = url
@@ -231,7 +238,12 @@ final class MPVPlayer: ObservableObject {
         retries = 0
         isReconnecting = false
         resetDiagnosis()
+        self.hasBackups = hasBackups && isLive
+        backupRequested = false
+        stallStarts = []
         tracks = []
+        // So the new stream's wait counts as its own, even when the previous one was waiting too.
+        isBuffering = false
         load(url, startAt: start)
         if let recording { duration = recording.length }
     }
@@ -353,6 +365,10 @@ final class MPVPlayer: ObservableObject {
         sleepAt = nil
         currentURL = nil
         resetDiagnosis()
+        hasBackups = false
+        longWaitTask?.cancel()
+        noticeTask?.cancel()
+        notice = nil
         queue.async {
             self.run(["stop"])
             self.streamOpen = false
@@ -376,6 +392,16 @@ final class MPVPlayer: ObservableObject {
         // often drops precisely because another device started watching, so reopening it without
         // being asked could put a second stream on the account. Reconnecting is therefore opt-in.
         let reconnects = UserDefaults.standard.bool(forKey: Self.autoReconnectKey)
+        // With backups, the next channel takes over instead of this one being reopened. Opening it is
+        // as much a new stream as reconnecting, so it is allowed only when reconnecting is.
+        if hasBackups, reconnects, !backupRequested {
+            isReconnecting = false
+            isBuffering = false
+            canRetry = true
+            errorMessage = message
+            requestBackup(stopped: true)
+            return
+        }
         // Only stable playback counts as a successful reconnect, so repeated cut-offs still end.
         if hasStarted, Date().timeIntervalSince(lastStart) > 60 { retries = 0 }
         // A channel that never started gets one more try; one that was playing gets several.
@@ -416,8 +442,12 @@ final class MPVPlayer: ObservableObject {
 
     private func bufferingStarted() {
         guard let url = currentURL else { return }
+        waitingSince = Date()
+        if hasStarted { stallStarts.append(Date()) }
+        scheduleLongWait()
         if let last = lastDiagnosis, last.url == url, Date().timeIntervalSince(last.at) < Self.diagnosisLifetime {
             bufferingReason = last.reason
+            considerBackup()
             return
         }
         bufferingReason = nil
@@ -425,14 +455,102 @@ final class MPVPlayer: ObservableObject {
         diagnosisTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: Self.diagnosisDelay)
             guard let self, !Task.isCancelled else { return }
-            defer { if !Task.isCancelled { self.diagnosisTask = nil } }
-            guard self.isBuffering, self.currentURL == url else { return }
+            guard self.isBuffering, self.currentURL == url else {
+                self.diagnosisTask = nil
+                return
+            }
             let check = await NetworkCheck.measure()
             let rates = await Task.detached { self.streamRates() }.value
-            guard !Task.isCancelled, self.currentURL == url else { return }
+            guard !Task.isCancelled else { return }
+            self.diagnosisTask = nil
+            guard self.currentURL == url else { return }
             let reason = BufferingReason.diagnose(check: check, streamArriving: rates.arriving, streamNeeds: rates.needed)
             self.lastDiagnosis = (url, Date(), reason)
             if self.isBuffering { self.bufferingReason = reason }
+            self.considerBackup()
+        }
+    }
+
+    private func bufferingEnded() {
+        waitingSince = nil
+        longWaitTask?.cancel()
+    }
+
+    // Backup channels; main thread only.
+    struct BackupRequest: Equatable {
+        let id = UUID()
+        /// True when the stream dropped, false when it kept stalling.
+        let stopped: Bool
+    }
+
+    /// Set when the channel playing has failed and the next one in its list should take over.
+    /// Each request is new, so screens act on it changing.
+    @Published private(set) var backupRequest: BackupRequest?
+    /// A short message over the picture, such as which channel took over.
+    @Published private(set) var notice: String?
+    private var noticeTask: Task<Void, Never>?
+    private var hasBackups = false
+    /// Whether this stream has already asked for its backup.
+    private var backupRequested = false
+    private var stallStarts: [Date] = []
+    private var waitingSince: Date?
+    private var longWaitTask: Task<Void, Never>?
+    /// When each stream address last failed, so it isn't switched straight back to.
+    private var backupFailedAt: [String: Date] = [:]
+
+    /// Gives the stream playing backups after it started, as when its list is opened later.
+    func useBackups() {
+        guard isLive, currentURL != nil, !hasBackups else { return }
+        hasBackups = true
+        scheduleLongWait()
+        considerBackup()
+    }
+
+    /// Looks again once the current wait has gone on long enough to count as failing.
+    private func scheduleLongWait() {
+        longWaitTask?.cancel()
+        guard hasBackups, let waitingSince else { return }
+        let remaining = Fallback.longWait + 0.5 - Date().timeIntervalSince(waitingSince)
+        longWaitTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(max(remaining, 0)))
+            guard !Task.isCancelled else { return }
+            self?.considerBackup()
+        }
+    }
+
+    private func considerBackup() {
+        guard hasBackups, !backupRequested, currentURL != nil,
+              Fallback.shouldSwitch(stallStarts: stallStarts, waitingSince: waitingSince, now: Date(),
+                                    reason: bufferingReason, checking: diagnosisTask != nil)
+        else { return }
+        requestBackup(stopped: false)
+    }
+
+    private func requestBackup(stopped: Bool) {
+        backupRequested = true
+        if let url = currentURL { backupFailedAt[url] = Date() }
+        backupRequest = BackupRequest(stopped: stopped)
+    }
+
+    /// The channel to switch to after `current`, in list order, skipping any that failed lately.
+    /// Says over the picture what happened, including when there is none left to try.
+    func takeBackup(after current: Channel, in channels: [Channel], stopped: Bool) -> Channel? {
+        let live = channels.filter { $0.kind == .live }
+        let next = Fallback.next(after: current.url, in: live.map(\.url), failedAt: backupFailedAt, now: Date())
+            .flatMap { url in live.first { $0.url == url } }
+        let what = stopped ? "stopped" : "kept buffering"
+        showNotice(next.map { "Switched to \($0.name): \(current.name) \(what)." }
+            ?? "\(current.name) \(what), and no other channel in the list is left to try.")
+        return next
+    }
+
+    func showNotice(_ text: String) {
+        notice = text
+        noticeTask?.cancel()
+        noticeTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(8))
+            guard !Task.isCancelled else { return }
+            self?.notice = nil
         }
     }
 

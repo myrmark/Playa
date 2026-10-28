@@ -128,6 +128,15 @@ struct ContentView: View {
         DispatchQueue.main.async { filter = wanted }
     }
 
+    /// The channels that can take over from the selected one: those of the list the sidebar is
+    /// showing, when it is a list of backups that holds the channel.
+    private var backupChannels: [Channel]? {
+        guard let list = currentList, list.usesBackups, let channel = selectedChannel,
+              visibleChannels.contains(channel)
+        else { return nil }
+        return visibleChannels
+    }
+
     /// The list the sidebar is showing, if it is showing one.
     private var currentList: ChannelList? {
         guard case .list(let id) = filter else { return nil }
@@ -170,7 +179,9 @@ struct ContentView: View {
                 programmes: epg.guide.nowAndNext(channelID: selectedChannel?.tvgID, at: now),
                 isFavourite: selectedChannel.map { store.favourites.contains($0.key) } ?? false,
                 toggleFavourite: { if let selectedChannel { store.toggleFavourite(selectedChannel) } },
-                isFullScreen: isFullScreen
+                isFullScreen: isFullScreen,
+                backups: backupChannels,
+                switchTo: { selectedChannel = $0 }
             )
                 .navigationTitle(selectedChannel?.name ?? "Playa")
         }
@@ -635,6 +646,10 @@ struct ContentView: View {
                     listPrompt = .rename(list.id)
                 }
                 Button("Delete “\(list.name)”…", role: .destructive) { listToDelete = list }
+                Toggle("Use as Backup Channels", isOn: Binding(
+                    get: { list.usesBackups },
+                    set: { store.setBackups($0, forList: list.id) }
+                ))
             }
             Divider()
             Toggle("Open “\(filterTitle)” at Launch", isOn: Binding(
@@ -914,6 +929,10 @@ private struct PlayerPane: View {
     let toggleFavourite: () -> Void
     /// In full screen the controls float over the picture and fade away while the mouse rests.
     let isFullScreen: Bool
+    /// The channels that take over, in turn, when this one keeps failing; nil when it has none.
+    let backups: [Channel]?
+    /// Plays another channel, as if it had been chosen in the list.
+    let switchTo: (Channel) -> Void
 
     @StateObject private var player = MPVPlayer()
     @EnvironmentObject private var playback: PlaybackCommands
@@ -933,6 +952,8 @@ private struct PlayerPane: View {
     @State private var hoverX: CGFloat?
     /// What the player is showing, kept so its position can be saved when the selection moves on.
     @State private var playing: Channel?
+    /// The backups of what is playing. Kept while one takes over, even if the sidebar has moved on.
+    @State private var playingBackups: [Channel]?
     @State private var watchTask: Task<Void, Never>?
 
     var body: some View {
@@ -985,6 +1006,30 @@ private struct PlayerPane: View {
                 ProgressView()
                     .controlSize(.large)
             }
+        }
+        .overlay(alignment: .top) {
+            if let notice = player.notice {
+                Text(notice)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                    .padding(12)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.default, value: player.notice)
+        .onChange(of: backups) { _, backups in
+            // By address: a refreshed playlist renumbers its channels.
+            guard let backups, let playing, playingBackups == nil, backups.contains(where: { $0.url == playing.url }) else { return }
+            playingBackups = backups
+            player.useBackups()
+        }
+        .onChange(of: player.backupRequest) { _, request in
+            guard let request, let playing, let list = playingBackups,
+                  let next = player.takeBackup(after: playing, in: list, stopped: request.stopped)
+            else { return }
+            switchTo(next)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if !isFullScreen { controls }
@@ -1063,7 +1108,9 @@ private struct PlayerPane: View {
         guard !isHeld, let channel, channel.url != playing?.url else { return }
         savePosition(isFinal: true)
         playing = channel
-        player.play(url: channel.url, startAt: resume.resumePosition(for: channel), isLive: channel.kind == .live, recording: channel.recording)
+        playingBackups = backups ?? (playingBackups?.contains { $0.url == channel.url } == true ? playingBackups : nil)
+        player.play(url: channel.url, startAt: resume.resumePosition(for: channel), isLive: channel.kind == .live,
+                    recording: channel.recording, hasBackups: playingBackups != nil)
         // Zapping past a channel shouldn't count as watching it.
         watchTask?.cancel()
         watchTask = Task {

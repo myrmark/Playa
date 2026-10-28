@@ -111,7 +111,7 @@ struct BrowseView: View {
                 Label("Favourites", systemImage: "star.fill").tag(BrowseFilter.favourites)
                 Label("Recently Watched", systemImage: "clock").tag(BrowseFilter.recent)
                 ForEach(store.lists) { list in
-                    Label(list.name, systemImage: "list.bullet")
+                    Label(list.name, systemImage: list.usesBackups ? "arrow.triangle.swap" : "list.bullet")
                         .tag(BrowseFilter.list(list.id))
                         .swipeActions {
                             Button("Delete", role: .destructive) { listToDelete = list }
@@ -119,6 +119,10 @@ struct BrowseView: View {
                         }
                         .contextMenu {
                             Button("Rename…") { listEditor.request = .rename(list) }
+                            Toggle("Use as Backup Channels", isOn: Binding(
+                                get: { list.usesBackups },
+                                set: { store.setBackups($0, forList: list.id) }
+                            ))
                             Button("Delete List", role: .destructive) { listToDelete = list }
                         }
                 }

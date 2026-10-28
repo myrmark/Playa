@@ -112,9 +112,15 @@ struct ChannelListView: View {
         }
     }
 
+    /// Whether the channels shown are a list of backups.
+    private var usesBackups: Bool {
+        guard case .list(let id) = filter else { return false }
+        return store.lists.first { $0.id == id }?.usesBackups ?? false
+    }
+
     @ViewBuilder
     private func row(for channel: Channel, in channels: [Channel], now: Date) -> some View {
-        let play = { session = PlayerSession(channels: channels, index: channels.firstIndex(of: channel) ?? 0) }
+        let play = { session = PlayerSession(channels: channels, index: channels.firstIndex(of: channel) ?? 0, backups: usesBackups) }
         Group {
             if isGuide {
                 Button(action: play) {
