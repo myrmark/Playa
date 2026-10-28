@@ -9,7 +9,11 @@ Playa is a media player. It has no accounts, no analytics, no advertising and no
 
 ## What Playa connects to
 
-Playa only contacts the addresses contained in the playlists you add: the playlist itself, its TV guide, channel logos and the streams you choose to play. Those servers can see your IP address, as with any player or web browser. Playa does not contact any other service.
+Playa contacts the addresses contained in the playlists you add: the playlist itself, its TV guide, channel logos and the streams you choose to play. Those servers can see your IP address, as with any player or web browser.
+
+When a stream has been waiting for data for a few seconds, Playa checks how fast your internet connection is, to tell you whether the slowness is on your side or the provider's. It does this by downloading test data for a few seconds from Apple's network quality server (mensura.cdn-apple.com), the same one macOS uses for its own speed test. Nothing is sent to it apart from the request itself, and Apple can see your IP address as with any server.
+
+Playa does not contact any other service.
 
 ## Your choices
 
@@ -19,4 +23,4 @@ Removing a playlist in Playa removes it from your devices and from your iCloud s
 
 Questions about this policy can be raised at https://github.com/myrmark/Playa/issues.
 
-Last updated: 2 October 2026.
+Last updated: 28 October 2026.

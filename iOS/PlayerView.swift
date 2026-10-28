@@ -101,6 +101,17 @@ struct PlayerView: View {
                 ProgressView("Reconnecting…")
                     .padding(20)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+            } else if player.isBuffering, let reason = player.bufferingReason {
+                VStack(spacing: 12) {
+                    ProgressView()
+                        .controlSize(.large)
+                    Text(reason.message)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 340)
+                }
+                .padding(20)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                .padding()
             } else if player.isBuffering {
                 ProgressView()
                     .controlSize(.large)

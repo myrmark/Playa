@@ -20,7 +20,10 @@ final class MPVPlayer: ObservableObject {
     }
 
     @Published var isPaused = false { didSet { updateKeepAwake() } }
-    @Published var isBuffering = false
+    @Published var isBuffering = false { didSet { if isBuffering, !oldValue { bufferingStarted() } } }
+    /// Why playback is waiting for data, once a speed check has found out. Only meaningful while
+    /// `isBuffering`; nil while unknown.
+    @Published private(set) var bufferingReason: BufferingReason?
     /// How much work goes into enlarging the picture to the screen. The Apple TV and iPhone
     /// GPUs may drop frames at the best setting with 1080p50 on a 4K screen.
     enum Quality: String, CaseIterable {
@@ -227,6 +230,7 @@ final class MPVPlayer: ObservableObject {
         streamStart = Date()
         retries = 0
         isReconnecting = false
+        resetDiagnosis()
         tracks = []
         load(url, startAt: start)
         if let recording { duration = recording.length }
@@ -348,6 +352,7 @@ final class MPVPlayer: ObservableObject {
         sleepTask?.cancel()
         sleepAt = nil
         currentURL = nil
+        resetDiagnosis()
         queue.async {
             self.run(["stop"])
             self.streamOpen = false
@@ -393,6 +398,50 @@ final class MPVPlayer: ObservableObject {
         }
     }
 
+    // Finding out why playback waits for data; main thread only.
+    private var diagnosisTask: Task<Void, Never>?
+    /// The last finding, reused for repeated stalls of the same stream.
+    private var lastDiagnosis: (url: String, at: Date, reason: BufferingReason?)?
+    /// How long playback must have waited before it is worth checking: short waits sort themselves out.
+    private static let diagnosisDelay: Duration = .seconds(3)
+    /// How long a finding holds for the same stream.
+    private static let diagnosisLifetime: TimeInterval = 60
+
+    private func resetDiagnosis() {
+        diagnosisTask?.cancel()
+        diagnosisTask = nil
+        lastDiagnosis = nil
+        bufferingReason = nil
+    }
+
+    private func bufferingStarted() {
+        guard let url = currentURL else { return }
+        if let last = lastDiagnosis, last.url == url, Date().timeIntervalSince(last.at) < Self.diagnosisLifetime {
+            bufferingReason = last.reason
+            return
+        }
+        bufferingReason = nil
+        guard diagnosisTask == nil else { return }
+        diagnosisTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: Self.diagnosisDelay)
+            guard let self, !Task.isCancelled else { return }
+            defer { if !Task.isCancelled { self.diagnosisTask = nil } }
+            guard self.isBuffering, self.currentURL == url else { return }
+            let check = await NetworkCheck.measure()
+            let rates = await Task.detached { self.streamRates() }.value
+            guard !Task.isCancelled, self.currentURL == url else { return }
+            let reason = BufferingReason.diagnose(check: check, streamArriving: rates.arriving, streamNeeds: rates.needed)
+            self.lastDiagnosis = (url, Date(), reason)
+            if self.isBuffering { self.bufferingReason = reason }
+        }
+    }
+
+    /// Bytes per second the stream is getting, and what it needs. Safe to call from any thread.
+    private func streamRates() -> (arriving: Double, needed: Double) {
+        func number(_ name: String) -> Double { propertyString(name).flatMap(Double.init) ?? 0 }
+        return (number("cache-speed"), (number("video-bitrate") + number("audio-bitrate")) / 8)
+    }
+
     /// A reading of how playback is going, to tell a slow stream from a player that can't keep up.
     struct Health: Equatable {
         var video = ""
@@ -428,8 +477,7 @@ final class MPVPlayer: ObservableObject {
         health.droppedFrames = health.droppedDrawing + Int(number("decoder-frame-drop-count"))
         health.screenRate = number("display-fps")
         health.bufferedSeconds = number("demuxer-cache-duration")
-        health.arriving = number("cache-speed")
-        health.needed = (number("video-bitrate") + number("audio-bitrate")) / 8
+        (health.arriving, health.needed) = streamRates()
         health.stalls = stalls
         health.minutesOpen = Int(Date().timeIntervalSince(streamStart) / 60)
         var info = task_vm_info_data_t()

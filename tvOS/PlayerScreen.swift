@@ -117,6 +117,15 @@ struct PlayerScreen: View {
                 }
                 .padding(40)
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+            } else if player.isBuffering, let reason = player.bufferingReason {
+                VStack(spacing: 24) {
+                    ProgressView()
+                    Text(reason.message)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 900)
+                }
+                .padding(40)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
             } else if player.isBuffering {
                 ProgressView()
             }

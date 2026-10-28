@@ -82,6 +82,8 @@ targets:
         group: Shared
       - path: Sources/Playa/MPVPlayer.swift
         group: Shared
+      - path: Sources/Playa/NetworkCheck.swift
+        group: Shared
       - path: Sources/Playa/Storage.swift
         group: Shared
       - path: Sources/Playa/Vault.swift
@@ -149,6 +151,8 @@ targets:
       - path: Sources/Playa/ResumeStore.swift
         group: Shared
       - path: Sources/Playa/MPVPlayer.swift
+        group: Shared
+      - path: Sources/Playa/NetworkCheck.swift
         group: Shared
       - path: Sources/Playa/Storage.swift
         group: Shared
